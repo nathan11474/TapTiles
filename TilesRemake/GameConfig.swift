@@ -18,6 +18,11 @@ struct GameConfig {
     // Target number of tiles visible on screen
     static let visibleTileCount: CGFloat = 4.3
 
+    // Long tile settings
+    static let longTileSpawnChance: CGFloat = 0.2  // 20% chance to spawn a long tile
+    static let longTileMinLength: Int = 2          // Minimum length in tile units
+    static let longTileMaxLength: Int = 3          // Maximum length in tile units
+
     // Tile dimensions (calculated relative to screen)
     static func tileSize(for screenSize: CGSize) -> CGSize {
         let tileWidth = screenSize.width / CGFloat(columnCount)

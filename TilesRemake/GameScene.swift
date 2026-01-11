@@ -34,6 +34,10 @@ class GameScene: SKScene {
     private var scoreLabel: SKLabelNode?
     private var tappedTiles: [TileNode] = []
 
+    // Long tile tracking
+    private var heldLongTile: TileNode?
+    private var heldTouchLocation: CGPoint = .zero  // Where the finger is during hold
+
     // MARK: - Scene Lifecycle
 
     override func didMove(to view: SKView) {
@@ -113,10 +117,28 @@ class GameScene: SKScene {
             startGame()
 
         case .playing:
-            if let tile = findTile(at: location) {
-                handleTileTap(tile)
+            // First check if tapping a long tile's bottom segment
+            if let longTile = findLongTileBottomSegment(at: location) {
+                // Start holding the long tile
+                longTile.isBeingHeld = true
+                longTile.fingerY = location.y
+                heldLongTile = longTile
+                heldTouchLocation = location
+
+                // Immediately complete the first segment (like tapping a normal tile)
+                longTile.completeFirstSegment()
+                score += 1
+                updateScoreDisplay()
+            } else if let tile = findTile(at: location) {
+                if tile.isLongTile {
+                    // Tapped a long tile but NOT at bottom segment - ignore
+                } else {
+                    handleTileTap(tile)
+                }
             } else if isTappedTile(at: location) {
                 // Tapped a ghost tile - ignore it
+            } else if isHeldLongTile(at: location) {
+                // Touching the currently held long tile - ignore
             } else {
                 triggerGameOver()
             }
@@ -127,6 +149,46 @@ class GameScene: SKScene {
                 restartGame()
             }
         }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard gameState == .playing, let heldTile = heldLongTile else { return }
+        guard let touch = touches.first else { return }
+        let location = touch.location(in: self)
+
+        // Don't update heldTouchLocation - segment completion is based on initial touch position
+        // Only check X bounds to ensure finger stays in the tile's column
+        let tileLeft = heldTile.position.x - heldTile.size.width / 2 - TileNode.hitboxPadding
+        let tileRight = heldTile.position.x + heldTile.size.width / 2 + TileNode.hitboxPadding
+
+        if location.x < tileLeft || location.x > tileRight {
+            // Finger left the tile's column - game over
+            heldTile.isBeingHeld = false
+            heldLongTile = nil
+            triggerGameOver()
+        }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard gameState == .playing, let heldTile = heldLongTile else { return }
+
+        // Released the long tile - complete it (user loses remaining points but no game over)
+        completeLongTile(heldTile)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Treat cancelled touches same as ended
+        touchesEnded(touches, with: event)
+    }
+
+    // Find a long tile where the bottom segment was tapped
+    private func findLongTileBottomSegment(at point: CGPoint) -> TileNode? {
+        for tile in activeTiles {
+            if tile.isLongTile && tile.isBottomSegmentTapped(at: point) {
+                return tile
+            }
+        }
+        return nil
     }
 
     private func findTile(at point: CGPoint) -> TileNode? {
@@ -147,16 +209,36 @@ class GameScene: SKScene {
         return false
     }
 
+    private func isHeldLongTile(at point: CGPoint) -> Bool {
+        guard let heldTile = heldLongTile else { return false }
+        return heldTile.hitboxFrame.contains(point)
+    }
+
     private func handleTileTap(_ tile: TileNode) {
-        // Make tile transparent instead of removing it
-        tile.color = UIColor.lightGray.withAlphaComponent(0.3)
-        tile.children.forEach { $0.removeFromParent() } // Remove border
+        // Make tile transparent
+        tile.makeTransparent()
 
         // Move from active to tapped tiles
         activeTiles.removeAll { $0 === tile }
         tappedTiles.append(tile)
 
         score += 1
+        updateScoreDisplay()
+    }
+
+    private func completeLongTile(_ tile: TileNode) {
+        // Tile is already transparent from segment completion
+        tile.makeTransparent()
+
+        // Move from active to tapped tiles
+        activeTiles.removeAll { $0 === tile }
+        tappedTiles.append(tile)
+
+        // Clear held tile reference
+        tile.isBeingHeld = false
+        heldLongTile = nil
+
+        // Points already awarded per segment, no additional points needed
         updateScoreDisplay()
     }
 
@@ -220,6 +302,9 @@ class GameScene: SKScene {
         }
         tappedTiles.removeAll()
 
+        // Clear held long tile
+        heldLongTile = nil
+
         // Remove game over UI elements
         childNode(withName: "gameOverOverlay")?.removeFromParent()
         childNode(withName: "gameOverLabel")?.removeFromParent()
@@ -246,13 +331,14 @@ class GameScene: SKScene {
         // Spawn a few rows at the top so user has time to react
         let initialRowCount = 2
 
-        for row in 0..<initialRowCount {
-            let yPosition = size.height + tileSize.height / 2 - CGFloat(row) * tileSize.height
-            spawnRow(at: yPosition)
+        var currentY = size.height + tileSize.height / 2
+        for _ in 0..<initialRowCount {
+            let tileUnits = spawnRow(at: currentY)
+            currentY += tileSize.height * CGFloat(tileUnits)  // Move UP for next tile (higher Y = enters screen later)
         }
     }
 
-    private func spawnRow(at yPosition: CGFloat) {
+    private func spawnRow(at yPosition: CGFloat) -> Int {
         // Find the topmost tile (highest Y) to avoid spawning in same column
         let topmostTile = activeTiles.max(by: { $0.position.y < $1.position.y })
 
@@ -263,14 +349,29 @@ class GameScene: SKScene {
         }
         let blackTileColumn = availableColumns.randomElement()!
 
-        let tile = TileNode(column: blackTileColumn, size: tileSize)
+        // Determine if this should be a long tile
+        let isLongTile = CGFloat.random(in: 0...1) < GameConfig.longTileSpawnChance
+        let tileLength: Int
+        if isLongTile {
+            tileLength = Int.random(in: GameConfig.longTileMinLength...GameConfig.longTileMaxLength)
+        } else {
+            tileLength = 1
+        }
+
+        let tile = TileNode(column: blackTileColumn, size: tileSize, tileLength: tileLength)
+
+        // Position tile - for long tiles, the center is higher due to larger size
+        let tileCenterY = yPosition + (CGFloat(tileLength - 1) * tileSize.height) / 2
         tile.position = CGPoint(
             x: columnPositions[blackTileColumn],
-            y: yPosition
+            y: tileCenterY
         )
 
         addChild(tile)
         activeTiles.append(tile)
+
+        // Return the number of tile units spawned (for spawn threshold adjustment)
+        return tileLength
     }
 
     // MARK: - Game Loop
@@ -304,9 +405,27 @@ class GameScene: SKScene {
             tile.position.y -= moveDistance
         }
 
+        // Update held long tile - check for segment completion
+        if let heldTile = heldLongTile {
+            // Update segments based on finger position
+            let completedCount = heldTile.updateSegmentsForHold(fingerY: heldTouchLocation.y)
+
+            // Award points for each newly completed segment
+            if completedCount > 0 {
+                score += completedCount
+                updateScoreDisplay()
+            }
+
+            // Check if all segments are complete
+            if heldTile.isFullyCompleted() {
+                completeLongTile(heldTile)
+            }
+        }
+
         // Remove tapped tiles that have scrolled off the bottom
         tappedTiles.removeAll { tile in
-            if tile.position.y < -tileSize.height / 2 {
+            let tileBottom = tile.position.y - tile.size.height / 2
+            if tileBottom < -tile.size.height {
                 tile.removeFromParent()
                 return true
             }
@@ -314,8 +433,13 @@ class GameScene: SKScene {
         }
 
         // Check if any tile has scrolled off the bottom - triggers game over
+        // Skip the currently held tile - its completion is handled by segment logic
         for tile in activeTiles {
-            if tile.position.y < -tileSize.height / 2 {
+            if tile === heldLongTile {
+                continue  // Skip held tile
+            }
+            let tileTop = tile.position.y + tile.size.height / 2
+            if tileTop < 0 {
                 triggerGameOver()
                 return
             }
@@ -323,10 +447,12 @@ class GameScene: SKScene {
 
         // Spawn new tile when topmost tile has moved down enough
         if let topmostTile = activeTiles.max(by: { $0.position.y < $1.position.y }) {
-            if topmostTile.position.y <= spawnThreshold {
-                // Spawn exactly one tile height above the current topmost tile
-                let newY = topmostTile.position.y + tileSize.height
-                spawnRow(at: newY)
+            // Use the top edge of the topmost tile
+            let topmostTileTop = topmostTile.position.y + topmostTile.size.height / 2
+            if topmostTileTop <= spawnThreshold + tileSize.height / 2 {
+                // Spawn at the top of the topmost tile
+                let newY = topmostTileTop + tileSize.height / 2
+                _ = spawnRow(at: newY)
             }
         }
     }
