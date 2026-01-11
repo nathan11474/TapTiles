@@ -27,7 +27,7 @@ class GameScene: SKScene {
 
     private var lastUpdateTime: TimeInterval = 0
 
-    private var startButton: SKLabelNode?
+    private var playTile: TileNode?
     private var spawnThreshold: CGFloat = 0
 
     private var score: Int = 0
@@ -71,22 +71,80 @@ class GameScene: SKScene {
     // MARK: - Start Screen
 
     private func showStartScreen() {
-        let button = SKLabelNode(text: "Start")
-        button.fontName = "Helvetica-Bold"
-        button.fontSize = 48
-        button.fontColor = .black
-        button.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        button.name = "startButton"
-        addChild(button)
-        startButton = button
+        // Create a "Play" tile at the bottom of the screen
+        let column = Int.random(in: 0..<GameConfig.columnCount)
+
+        // Determine if this should be a long tile (same logic as spawnRow)
+        let isLongTile = CGFloat.random(in: 0...1) < GameConfig.longTileSpawnChance
+        let tileLength: Int
+        if isLongTile {
+            tileLength = Int.random(in: GameConfig.longTileMinLength...GameConfig.longTileMaxLength)
+        } else {
+            tileLength = 1
+        }
+
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength)
+
+        // Position at the bottom of the screen (so bottom edge touches screen bottom)
+        // For long tiles, the center is higher due to larger size
+        tile.position = CGPoint(
+            x: columnPositions[column],
+            y: tile.size.height / 2
+        )
+
+        // Add "Play" label to the first (bottom) segment
+        let playLabel = SKLabelNode(text: "Play")
+        playLabel.fontName = "Helvetica-Bold"
+        playLabel.fontSize = 36
+        playLabel.fontColor = .white
+        playLabel.verticalAlignmentMode = .center
+        playLabel.horizontalAlignmentMode = .center
+        playLabel.zPosition = 10
+        // Position label at center of first segment (relative to tile center)
+        let firstSegmentCenterY = -tile.size.height / 2 + tileSize.height / 2
+        playLabel.position = CGPoint(x: 0, y: firstSegmentCenterY)
+        tile.addChild(playLabel)
+
+        addChild(tile)
+        playTile = tile
+
+        // Spawn tiles above the Play tile (visible but stationary until game starts)
+        spawnInitialTiles()
     }
 
     private func startGame() {
-        startButton?.removeFromParent()
-        startButton = nil
+        // Handle the play tile like a normal tile tap (for non-long tiles)
+        if let tile = playTile {
+            tile.makeTransparent()
+            tappedTiles.append(tile)
+            score += 1
+        }
+        playTile = nil
+
         gameState = .playing
         setupScoreLabel()
-        spawnInitialTiles()
+        updateScoreDisplay()
+    }
+
+    private func startGameWithLongPlayTile(_ tile: TileNode, touchLocation: CGPoint) {
+        // Start the game
+        gameState = .playing
+        setupScoreLabel()
+
+        // Add Play tile to active tiles so it's tracked during gameplay
+        activeTiles.append(tile)
+        playTile = nil
+
+        // Start holding the long tile (same as normal long tile behavior)
+        tile.isBeingHeld = true
+        tile.fingerY = touchLocation.y
+        heldLongTile = tile
+        heldTouchLocation = touchLocation
+
+        // Complete the first segment and award 1 point
+        tile.completeFirstSegment()
+        score += 1
+        updateScoreDisplay()
     }
 
     // MARK: - Score Display
@@ -114,7 +172,22 @@ class GameScene: SKScene {
 
         switch gameState {
         case .waiting:
-            startGame()
+            // Only start game if the Play tile is tapped
+            guard let tile = playTile else { return }
+
+            if tile.isLongTile {
+                // Long Play tile - must tap bottom segment and hold like normal long tiles
+                if tile.isBottomSegmentTapped(at: location) {
+                    startGameWithLongPlayTile(tile, touchLocation: location)
+                }
+                // Tapping upper segments or elsewhere does nothing
+            } else {
+                // Normal Play tile - single tap to start
+                if tile.hitboxFrame.contains(location) {
+                    startGame()
+                }
+            }
+            // Tapping elsewhere does nothing
 
         case .playing:
             // First check if tapping a long tile's bottom segment
@@ -315,11 +388,14 @@ class GameScene: SKScene {
         score = 0
         currentSpeed = GameConfig.initialScrollSpeed
         lastUpdateTime = 0
-        updateScoreDisplay()
 
-        // Start playing again
-        gameState = .playing
-        spawnInitialTiles()
+        // Remove score label (will be re-added when game starts)
+        scoreLabel?.removeFromParent()
+        scoreLabel = nil
+
+        // Go back to waiting state with Play tile
+        gameState = .waiting
+        showStartScreen()
     }
 
     // MARK: - Tile Spawning
@@ -328,25 +404,36 @@ class GameScene: SKScene {
         // Set spawn threshold - spawn new tile when topmost tile drops below this Y
         spawnThreshold = size.height - tileSize.height / 2
 
-        // Spawn a few rows at the top so user has time to react
-        let initialRowCount = 2
+        // Start spawning from just above the Play tile
+        // Play tile's top edge depends on its size (could be a long tile)
+        guard let tile = playTile else { return }
+        let playTileTop = tile.position.y + tile.size.height / 2
+        var currentY = playTileTop + tileSize.height / 2  // Center of first tile above Play tile
 
-        var currentY = size.height + tileSize.height / 2
-        for _ in 0..<initialRowCount {
+        // Spawn tiles until we're past the top of the screen + buffer
+        while currentY < size.height + tileSize.height * 3 {
             let tileUnits = spawnRow(at: currentY)
-            currentY += tileSize.height * CGFloat(tileUnits)  // Move UP for next tile (higher Y = enters screen later)
+            currentY += tileSize.height * CGFloat(tileUnits)
         }
     }
 
     private func spawnRow(at yPosition: CGFloat) -> Int {
         // Find the topmost tile (highest Y) to avoid spawning in same column
-        let topmostTile = activeTiles.max(by: { $0.position.y < $1.position.y })
+        // Check active tiles, tapped tiles, and the play tile
+        let topmostActiveTile = activeTiles.max(by: { $0.position.y < $1.position.y })
 
         // Randomly select column, excluding the topmost tile's column
         var availableColumns = Array(0..<GameConfig.columnCount)
-        if let excludeColumn = topmostTile?.column {
+
+        // Exclude the topmost active tile's column
+        if let excludeColumn = topmostActiveTile?.column {
             availableColumns.removeAll { $0 == excludeColumn }
         }
+        // Also exclude the play tile's column (for initial spawn)
+        else if let excludeColumn = playTile?.column {
+            availableColumns.removeAll { $0 == excludeColumn }
+        }
+
         let blackTileColumn = availableColumns.randomElement()!
 
         // Determine if this should be a long tile
@@ -434,12 +521,12 @@ class GameScene: SKScene {
 
         // Check if any tile has scrolled off the bottom - triggers game over
         // Skip the currently held tile - its completion is handled by segment logic
+        // For long tiles, check the top of the first (bottom) segment, not the whole tile
         for tile in activeTiles {
             if tile === heldLongTile {
                 continue  // Skip held tile
             }
-            let tileTop = tile.position.y + tile.size.height / 2
-            if tileTop < 0 {
+            if tile.firstSegmentTop < 0 {
                 triggerGameOver()
                 return
             }

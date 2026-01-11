@@ -46,6 +46,12 @@ class TileNode: SKSpriteNode {
         )
     }
 
+    // Top of the first (bottom) segment - used for game over detection
+    var firstSegmentTop: CGFloat {
+        let tileBottom = position.y - size.height / 2
+        return tileBottom + unitHeight
+    }
+
     init(column: Int, size: CGSize, tileLength: Int = 1) {
         self.column = column
         self.tileLength = tileLength
