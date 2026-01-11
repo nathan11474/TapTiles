@@ -262,18 +262,18 @@ Reset everything and start a new game.
 - [x] No compiler warnings related to the new code
 
 ### Manual Verification:
-- [ ] Tapping a black tile removes it from the screen
-- [ ] Score increments by 1 for each tile tapped
-- [ ] Score is visible at top of screen during gameplay
-- [ ] Tapping white/empty space triggers game over
-- [ ] Letting a tile scroll off the bottom triggers game over
-- [ ] Game over screen displays "Game Over" text
-- [ ] Game over screen shows final score
-- [ ] Game over screen has a restart button
-- [ ] Tapping restart begins a new game
-- [ ] After restart, score is reset to 0
-- [ ] After restart, tiles start from the top again
-- [ ] After restart, speed is reset to initial speed
+- [x] Tapping a black tile removes it from the screen
+- [x] Score increments by 1 for each tile tapped
+- [x] Score is visible at top of screen during gameplay
+- [x] Tapping white/empty space triggers game over
+- [x] Letting a tile scroll off the bottom triggers game over
+- [x] Game over screen displays "Game Over" text
+- [x] Game over screen shows final score
+- [x] Game over screen has a restart button
+- [x] Tapping restart begins a new game
+- [x] After restart, score is reset to 0
+- [x] After restart, tiles start from the top again
+- [x] After restart, speed is reset to initial speed
 
 ---
 

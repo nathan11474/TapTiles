@@ -32,6 +32,7 @@ class GameScene: SKScene {
 
     private var score: Int = 0
     private var scoreLabel: SKLabelNode?
+    private var tappedTiles: [TileNode] = []
 
     // MARK: - Scene Lifecycle
 
@@ -90,8 +91,8 @@ class GameScene: SKScene {
         let label = SKLabelNode(text: "0")
         label.fontName = "Helvetica-Bold"
         label.fontSize = 32
-        label.fontColor = .black
-        label.position = CGPoint(x: size.width / 2, y: size.height - 60)
+        label.fontColor = .red
+        label.position = CGPoint(x: size.width / 2, y: size.height - 80)
         label.zPosition = 100
         addChild(label)
         scoreLabel = label
@@ -114,6 +115,8 @@ class GameScene: SKScene {
         case .playing:
             if let tile = findTile(at: location) {
                 handleTileTap(tile)
+            } else if isTappedTile(at: location) {
+                // Tapped a ghost tile - ignore it
             } else {
                 triggerGameOver()
             }
@@ -128,16 +131,31 @@ class GameScene: SKScene {
 
     private func findTile(at point: CGPoint) -> TileNode? {
         for tile in activeTiles {
-            if tile.frame.contains(point) {
+            if tile.hitboxFrame.contains(point) {
                 return tile
             }
         }
         return nil
     }
 
+    private func isTappedTile(at point: CGPoint) -> Bool {
+        for tile in tappedTiles {
+            if tile.hitboxFrame.contains(point) {
+                return true
+            }
+        }
+        return false
+    }
+
     private func handleTileTap(_ tile: TileNode) {
-        tile.removeFromParent()
+        // Make tile transparent instead of removing it
+        tile.color = UIColor.lightGray.withAlphaComponent(0.3)
+        tile.children.forEach { $0.removeFromParent() } // Remove border
+
+        // Move from active to tapped tiles
         activeTiles.removeAll { $0 === tile }
+        tappedTiles.append(tile)
+
         score += 1
         updateScoreDisplay()
     }
@@ -196,6 +214,11 @@ class GameScene: SKScene {
             tile.removeFromParent()
         }
         activeTiles.removeAll()
+
+        for tile in tappedTiles {
+            tile.removeFromParent()
+        }
+        tappedTiles.removeAll()
 
         // Remove game over UI elements
         childNode(withName: "gameOverOverlay")?.removeFromParent()
@@ -276,6 +299,18 @@ class GameScene: SKScene {
         let moveDistance = currentSpeed * CGFloat(deltaTime)
         for tile in activeTiles {
             tile.position.y -= moveDistance
+        }
+        for tile in tappedTiles {
+            tile.position.y -= moveDistance
+        }
+
+        // Remove tapped tiles that have scrolled off the bottom
+        tappedTiles.removeAll { tile in
+            if tile.position.y < -tileSize.height / 2 {
+                tile.removeFromParent()
+                return true
+            }
+            return false
         }
 
         // Check if any tile has scrolled off the bottom - triggers game over

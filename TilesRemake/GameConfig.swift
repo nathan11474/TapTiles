@@ -11,8 +11,8 @@ struct GameConfig {
     static let columnCount: Int = 4
 
     // Scrolling speed (points per second)
-    static let initialScrollSpeed: CGFloat = 300.0
-    static let maxScrollSpeed: CGFloat = 800.0
+    static let initialScrollSpeed: CGFloat = 1300.0
+    static let maxScrollSpeed: CGFloat = 2500.0
     static let speedIncreaseRate: CGFloat = 5.0
 
     // Target number of tiles visible on screen
