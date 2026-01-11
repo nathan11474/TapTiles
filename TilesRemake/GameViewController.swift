@@ -2,41 +2,31 @@
 //  GameViewController.swift
 //  TilesRemake
 //
-//  Created by Nathan Hart on 11/1/26.
-//
 
 import UIKit
 import SpriteKit
-import GameplayKit
 
 class GameViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        if let view = self.view as! SKView? {
-            // Load the SKScene from 'GameScene.sks'
-            if let scene = SKScene(fileNamed: "GameScene") {
-                // Set the scale mode to scale to fit the window
-                scene.scaleMode = .aspectFill
-                
-                // Present the scene
-                view.presentScene(scene)
-            }
-            
-            view.ignoresSiblingOrder = true
-            
-            view.showsFPS = true
-            view.showsNodeCount = true
-        }
+
+        guard let view = self.view as? SKView else { return }
+
+        // Create scene programmatically with view bounds
+        let scene = GameScene(size: view.bounds.size)
+        scene.scaleMode = .resizeFill
+
+        view.presentScene(scene)
+        view.ignoresSiblingOrder = true
+
+        // Debug info (remove for release)
+        view.showsFPS = true
+        view.showsNodeCount = true
     }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            return .allButUpsideDown
-        } else {
-            return .all
-        }
+        return .portrait
     }
 
     override var prefersStatusBarHidden: Bool {
