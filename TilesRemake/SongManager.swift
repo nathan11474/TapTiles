@@ -50,26 +50,32 @@ class SongManager {
     private func loadAvailableSongs() {
         availableSongs = []
 
-        // Try to load from Songs subdirectory first
-        if let urls = Bundle.main.urls(forResourcesWithExtension: "mid", subdirectory: "Songs") {
-            for url in urls {
-                let songId = url.deletingPathExtension().lastPathComponent
-                let settings = songSettings[songId]
-                let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
-                let startFromNote = settings?.startFromNote
-                availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
-            }
-        }
+        let midiExtensions = ["mid", "midi"]
 
-        // Fallback: search bundle root for .mid files
-        if availableSongs.isEmpty {
-            if let urls = Bundle.main.urls(forResourcesWithExtension: "mid", subdirectory: nil) {
+        // Try to load from Songs subdirectory first
+        for ext in midiExtensions {
+            if let urls = Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: "Songs") {
                 for url in urls {
                     let songId = url.deletingPathExtension().lastPathComponent
                     let settings = songSettings[songId]
                     let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
                     let startFromNote = settings?.startFromNote
                     availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
+                }
+            }
+        }
+
+        // Fallback: search bundle root for MIDI files
+        if availableSongs.isEmpty {
+            for ext in midiExtensions {
+                if let urls = Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: nil) {
+                    for url in urls {
+                        let songId = url.deletingPathExtension().lastPathComponent
+                        let settings = songSettings[songId]
+                        let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
+                        let startFromNote = settings?.startFromNote
+                        availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
+                    }
                 }
             }
         }

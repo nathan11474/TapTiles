@@ -8,7 +8,7 @@ class SongListScene: SKScene {
     // MARK: - Properties
 
     private var songs: [SongInfo] = []
-    private var songRows: [(container: SKNode, song: SongInfo)] = []
+    private var playButtons: [(button: SKNode, song: SongInfo)] = []
     private let rowHeight: CGFloat = 80
 
     // Difficulty thresholds (based on initial speed in pts/sec)
@@ -54,23 +54,23 @@ class SongListScene: SKScene {
         backButton.position = CGPoint(x: 20, y: size.height - 60)
         addChild(backButton)
 
-        // "Select Song" header
+        // "Select Song" header (positioned lower)
         let headerLabel = SKLabelNode(text: "Select Song")
         headerLabel.fontName = "Helvetica-Bold"
         headerLabel.fontSize = 32
         headerLabel.fontColor = .black
-        headerLabel.position = CGPoint(x: size.width / 2, y: size.height - 60)
+        headerLabel.position = CGPoint(x: size.width / 2, y: size.height - 110)
         addChild(headerLabel)
     }
 
     private func setupSongList() {
-        let startY = size.height - 120
+        let startY = size.height - 160
 
         for (index, song) in songs.enumerated() {
             let yPos = startY - CGFloat(index) * rowHeight
-            let songRow = createSongRow(song: song, at: yPos)
+            let (songRow, playButton) = createSongRow(song: song, at: yPos)
             addChild(songRow)
-            songRows.append((container: songRow, song: song))
+            playButtons.append((button: playButton, song: song))
         }
 
         // Show message if no songs found
@@ -84,56 +84,80 @@ class SongListScene: SKScene {
         }
     }
 
-    private func createSongRow(song: SongInfo, at yPos: CGFloat) -> SKNode {
+    private func createSongRow(song: SongInfo, at yPos: CGFloat) -> (container: SKNode, playButton: SKNode) {
         let container = SKNode()
         container.position = CGPoint(x: 0, y: yPos)
         container.name = "songRow_\(song.id)"
 
-        // Row background (for tap area)
-        let background = SKShapeNode(rectOf: CGSize(width: size.width - 40, height: rowHeight - 10))
-        background.fillColor = UIColor(white: 0.95, alpha: 1.0)
-        background.strokeColor = .clear
-        background.position = CGPoint(x: size.width / 2, y: 0)
-        container.addChild(background)
-
-        // Difficulty box
+        let boxHeight = rowHeight - 10
         let difficulty = calculateDifficulty(for: song)
-        let boxSize: CGFloat = 36
-        let difficultyBox = SKShapeNode(rectOf: CGSize(width: boxSize, height: boxSize), cornerRadius: 4)
+        let difficultyBoxWidth = boxHeight  // Square difficulty box
+        let cornerRadius: CGFloat = 10
+        let padding: CGFloat = 20
+        let songBoxWidth = size.width - padding * 2 - difficultyBoxWidth - 5  // 5pt gap between boxes
+
+        // Difficulty box (left side, same height as song box)
+        let difficultyBox = SKShapeNode(rectOf: CGSize(width: difficultyBoxWidth, height: boxHeight), cornerRadius: cornerRadius)
         difficultyBox.fillColor = SongListScene.difficultyColors[difficulty] ?? .gray
         difficultyBox.strokeColor = .clear
-        difficultyBox.position = CGPoint(x: 38, y: 0)
+        difficultyBox.position = CGPoint(x: padding + difficultyBoxWidth / 2, y: 0)
         container.addChild(difficultyBox)
 
         let difficultyLabel = SKLabelNode(text: "\(difficulty)")
         difficultyLabel.fontName = "Helvetica-Bold"
-        difficultyLabel.fontSize = 20
+        difficultyLabel.fontSize = 28
         difficultyLabel.fontColor = .white
         difficultyLabel.verticalAlignmentMode = .center
         difficultyLabel.horizontalAlignmentMode = .center
-        difficultyLabel.position = CGPoint(x: 38, y: 0)
+        difficultyLabel.position = CGPoint(x: padding + difficultyBoxWidth / 2, y: 0)
         container.addChild(difficultyLabel)
 
-        // Song title (shifted right to make room for difficulty box)
+        // Song box (right of difficulty box, with curved edges)
+        let songBoxX = padding + difficultyBoxWidth + 5 + songBoxWidth / 2
+        let songBox = SKShapeNode(rectOf: CGSize(width: songBoxWidth, height: boxHeight), cornerRadius: cornerRadius)
+        songBox.fillColor = UIColor(white: 0.95, alpha: 1.0)
+        songBox.strokeColor = .clear
+        songBox.position = CGPoint(x: songBoxX, y: 0)
+        container.addChild(songBox)
+
+        // Song title (inside song box)
         let titleLabel = SKLabelNode(text: song.title)
         titleLabel.fontName = "Helvetica"
-        titleLabel.fontSize = 18  // Change this value to adjust song name font size
+        titleLabel.fontSize = 14  // Change this value to adjust song name font size
         titleLabel.fontColor = .black
         titleLabel.horizontalAlignmentMode = .left
         titleLabel.verticalAlignmentMode = .center
-        titleLabel.position = CGPoint(x: 65, y: 0)
+        titleLabel.position = CGPoint(x: padding + difficultyBoxWidth + 20, y: 0)
         container.addChild(titleLabel)
 
-        // Play button
-        let playButton = SKLabelNode(text: "▶")
-        playButton.fontName = "Helvetica"
-        playButton.fontSize = 28
-        playButton.fontColor = .black
-        playButton.verticalAlignmentMode = .center
-        playButton.position = CGPoint(x: size.width - 40, y: 0)
-        container.addChild(playButton)
+        // Play button container (larger hit area) - positioned relative to container
+        let playButtonContainer = SKNode()
+        playButtonContainer.position = CGPoint(x: size.width - padding - 25, y: 0)
+        playButtonContainer.zPosition = 10  // Ensure it's above other elements
 
-        return container
+        // Invisible hit area (larger than the triangle for easier tapping)
+        let hitAreaSize: CGFloat = 44
+        let hitArea = SKShapeNode(rectOf: CGSize(width: hitAreaSize, height: hitAreaSize))
+        hitArea.fillColor = .clear
+        hitArea.strokeColor = .clear
+        playButtonContainer.addChild(hitArea)
+
+        // Visible triangle
+        let triangleSize: CGFloat = 16
+        let trianglePath = CGMutablePath()
+        trianglePath.move(to: CGPoint(x: -triangleSize / 2, y: -triangleSize / 2))
+        trianglePath.addLine(to: CGPoint(x: -triangleSize / 2, y: triangleSize / 2))
+        trianglePath.addLine(to: CGPoint(x: triangleSize / 2, y: 0))
+        trianglePath.closeSubpath()
+
+        let triangle = SKShapeNode(path: trianglePath)
+        triangle.fillColor = .black
+        triangle.strokeColor = .clear
+        playButtonContainer.addChild(triangle)
+
+        container.addChild(playButtonContainer)
+
+        return (container, playButtonContainer)
     }
 
     // MARK: - Difficulty Calculation
@@ -181,11 +205,15 @@ class SongListScene: SKScene {
             return
         }
 
-        // Check song rows
-        for (container, song) in songRows {
-            if container.contains(location) {
-                startGame(with: song)
-                return
+        // Check play buttons only (not the entire song row)
+        for (button, song) in playButtons {
+            // Convert scene location to the button's parent coordinate space
+            if let parent = button.parent {
+                let locationInParent = parent.convert(location, from: self)
+                if button.contains(locationInParent) {
+                    startGame(with: song)
+                    return
+                }
             }
         }
     }
