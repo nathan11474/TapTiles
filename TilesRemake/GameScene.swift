@@ -17,13 +17,33 @@ class GameScene: SKScene {
 
     private var gameState: GameState = .waiting
 
+    // MARK: - Song
+
+    private let songURL: URL
+    private let customSpeed: CGFloat?  // Optional custom speed override
+    private let startFromNote: Int?    // Optional note index to start from
+
+    // MARK: - Initializers
+
+    init(size: CGSize, songURL: URL, customSpeed: CGFloat? = nil, startFromNote: Int? = nil) {
+        self.songURL = songURL
+        self.customSpeed = customSpeed
+        self.startFromNote = startFromNote
+        super.init(size: size)
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     // MARK: - Properties
 
     private var tileSize: CGSize = .zero
     private var columnPositions: [CGFloat] = []
 
     private var activeTiles: [TileNode] = []
-    private var currentSpeed: CGFloat = GameConfig.initialScrollSpeed
+    private var currentSpeed: CGFloat = 0  // Will be set from beatmap tempo
+    private var initialSpeed: CGFloat = 0  // Base speed from song tempo
 
     private var lastUpdateTime: TimeInterval = 0
 
@@ -43,10 +63,15 @@ class GameScene: SKScene {
     private var currentNoteIndex: Int = 0
     private var songStartTime: TimeInterval = 0
 
+    // Relative thresholds (calculated from song's average gap)
+    private var longTileThreshold: TimeInterval = 0.5  // Gaps longer than this become long tiles
+    private var segmentDuration: TimeInterval = 0.4    // Duration per long tile segment
+
     // MARK: - Scene Lifecycle
 
     override func didMove(to view: SKView) {
         backgroundColor = .white
+        view.isMultipleTouchEnabled = true  // Enable simultaneous touch detection
         AudioManager.shared.setup()
         loadBeatmap()
         setupLayout()
@@ -54,17 +79,38 @@ class GameScene: SKScene {
     }
 
     private func loadBeatmap() {
-        guard let url = Bundle.main.url(forResource: "song", withExtension: "mid") else {
-            print("GameScene: Could not find song.mid in bundle")
-            return
-        }
-
         let parser = MidiParser()
-        if let loadedBeatmap = parser.parse(url: url) {
+        if let loadedBeatmap = parser.parse(url: songURL) {
             beatmap = loadedBeatmap
-            print("GameScene: Loaded beatmap '\(loadedBeatmap.title)' with \(loadedBeatmap.notes.count) notes, duration: \(loadedBeatmap.totalDuration)s")
+
+            // Calculate relative thresholds based on song's average gap
+            longTileThreshold = loadedBeatmap.averageGap * GameConfig.longTileGapMultiplier
+            segmentDuration = loadedBeatmap.averageGap * GameConfig.tileSegmentMultiplier
+
+            // Use custom speed if provided, otherwise calculate from note density
+            if let custom = customSpeed {
+                initialSpeed = custom
+                print("GameScene: Loaded beatmap '\(loadedBeatmap.title)' - using custom speed: \(String(format: "%.0f", initialSpeed))")
+            } else {
+                // Calculate initial speed based on note density (notes per second)
+                // This ensures songs with sparse notes don't feel too slow
+                // and songs with dense notes don't feel too rushed
+                let notesPerSecond = CGFloat(loadedBeatmap.notes.count) / CGFloat(loadedBeatmap.totalDuration)
+                let estimatedTileHeight = size.height / GameConfig.visibleTileCount
+
+                // Speed = tile height × notes per second
+                // This means one tile scrolls past per note on average
+                initialSpeed = estimatedTileHeight * notesPerSecond
+
+                print("GameScene: Loaded beatmap '\(loadedBeatmap.title)' - \(loadedBeatmap.notes.count) notes, \(String(format: "%.1f", loadedBeatmap.totalDuration))s, trimmed mean gap: \(String(format: "%.3f", loadedBeatmap.averageGap))s, threshold: \(String(format: "%.3f", longTileThreshold))s, speed: \(String(format: "%.0f", initialSpeed))")
+            }
+            currentSpeed = initialSpeed
         } else {
-            print("GameScene: Failed to parse MIDI file")
+            print("GameScene: Failed to parse MIDI file at \(songURL)")
+            // Fallback to default speed if no beatmap (~2 notes/sec)
+            let estimatedTileHeight = size.height / GameConfig.visibleTileCount
+            initialSpeed = estimatedTileHeight * 2.0
+            currentSpeed = initialSpeed
         }
     }
 
@@ -93,20 +139,26 @@ class GameScene: SKScene {
     // MARK: - Start Screen
 
     private func showStartScreen() {
-        // Reset note index for new game
-        currentNoteIndex = 0
+        // Reset note index for new game (or skip to startFromNote if set)
+        let startIndex = startFromNote ?? 0
+        currentNoteIndex = min(startIndex, (beatmap?.notes.count ?? 1) - 1)
 
         // Create a "Play" tile at the bottom of the screen
         let column = Int.random(in: 0..<GameConfig.columnCount)
 
-        // Get the first note from the beatmap
-        let firstNote = beatmap?.notes.first
-        let midiNote = firstNote?.midiNote ?? GameConfig.randomNote()
+        // Get the starting note from the beatmap
+        let firstNote: NoteEvent?
+        if let notes = beatmap?.notes, currentNoteIndex < notes.count {
+            firstNote = notes[currentNoteIndex]
+        } else {
+            firstNote = nil
+        }
+        let midiNotes = firstNote?.midiNotes ?? [GameConfig.randomNote()]
 
         // Determine tile length based on gap to next note (if beatmap exists)
         let tileLength: Int
-        if let note = firstNote, note.gapToNextNote > GameConfig.longTileGapThreshold {
-            let calculatedLength = Int(round(note.gapToNextNote / GameConfig.tileSegmentDuration))
+        if let note = firstNote, note.gapToNextNote > longTileThreshold {
+            let calculatedLength = Int(round(note.gapToNextNote / segmentDuration))
             // If calculation gives < 2, just make it a normal tile
             tileLength = calculatedLength >= 2 ? min(calculatedLength, GameConfig.longTileMaxLength) : 1
         } else {
@@ -116,12 +168,12 @@ class GameScene: SKScene {
         // Get note duration for audio decay
         let noteDuration = firstNote?.noteDuration ?? 0.5
 
-        // First note is now represented by the Play tile
+        // Play tile represents the current note, so advance to the next one
         if beatmap != nil {
-            currentNoteIndex = 1
+            currentNoteIndex += 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNote: midiNote, noteDuration: noteDuration)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: midiNotes, noteDuration: noteDuration)
 
         // Position at the bottom of the screen (so bottom edge touches screen bottom)
         // For long tiles, the center is higher due to larger size
@@ -153,7 +205,7 @@ class GameScene: SKScene {
     private func startGame() {
         // Handle the play tile like a normal tile tap (for non-long tiles)
         if let tile = playTile {
-            AudioManager.shared.playShortNote(tile.midiNote, duration: tile.noteDuration)
+            AudioManager.shared.playShortNotes(tile.midiNotes, duration: tile.noteDuration)
             tile.makeTransparent()
             tappedTiles.append(tile)
             score += 1
@@ -182,8 +234,8 @@ class GameScene: SKScene {
         heldLongTile = tile
         heldTouchLocation = touchLocation
 
-        // Play the sustained note (lasts until tile is released)
-        AudioManager.shared.playSustainedNote(tile.midiNote)
+        // Play the sustained notes (lasts until tile is released)
+        AudioManager.shared.playSustainedNotes(tile.midiNotes)
 
         // Complete the first segment and award 1 point
         tile.completeFirstSegment()
@@ -211,12 +263,12 @@ class GameScene: SKScene {
     // MARK: - Touch Handling
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
-        let location = touch.location(in: self)
-
         switch gameState {
         case .waiting:
-            // Only start game if the Play tile is tapped
+            // Only need first touch for starting the game
+            guard let touch = touches.first else { return }
+            let location = touch.location(in: self)
+
             guard let tile = playTile else { return }
 
             if tile.isLongTile {
@@ -224,50 +276,67 @@ class GameScene: SKScene {
                 if tile.isBottomSegmentTapped(at: location) {
                     startGameWithLongPlayTile(tile, touchLocation: location)
                 }
-                // Tapping upper segments or elsewhere does nothing
             } else {
                 // Normal Play tile - single tap to start
                 if tile.hitboxFrame.contains(location) {
                     startGame()
                 }
             }
-            // Tapping elsewhere does nothing
 
         case .playing:
-            // First check if tapping a long tile's bottom segment
-            if let longTile = findLongTileBottomSegment(at: location) {
-                // Start holding the long tile
-                longTile.isBeingHeld = true
-                longTile.fingerY = location.y
-                heldLongTile = longTile
-                heldTouchLocation = location
+            // Process ALL touches to handle simultaneous taps (e.g., double tiles)
+            for touch in touches {
+                let location = touch.location(in: self)
+                handlePlayingTouch(at: location)
 
-                // Play the sustained note (lasts until tile is released)
-                AudioManager.shared.playSustainedNote(longTile.midiNote)
-
-                // Immediately complete the first segment (like tapping a normal tile)
-                longTile.completeFirstSegment()
-                score += 1
-                updateScoreDisplay()
-            } else if let tile = findTile(at: location) {
-                if tile.isLongTile {
-                    // Tapped a long tile but NOT at bottom segment - ignore
-                } else {
-                    handleTileTap(tile)
-                }
-            } else if isTappedTile(at: location) {
-                // Tapped a ghost tile - ignore it
-            } else if isHeldLongTile(at: location) {
-                // Touching the currently held long tile - ignore
-            } else {
-                triggerGameOver()
+                // Stop processing if game ended
+                if gameState != .playing { break }
             }
 
         case .gameOver:
+            // Only need first touch for buttons
+            guard let touch = touches.first else { return }
+            let location = touch.location(in: self)
+
             if let restartButton = childNode(withName: "restartButton"),
                restartButton.contains(location) {
                 restartGame()
+            } else if let exitButton = childNode(withName: "exitButton"),
+                      exitButton.contains(location) {
+                exitToSongList()
             }
+        }
+    }
+
+    /// Handle a single touch during gameplay
+    private func handlePlayingTouch(at location: CGPoint) {
+        // First check if tapping a long tile's bottom segment
+        if let longTile = findLongTileBottomSegment(at: location) {
+            // Start holding the long tile
+            longTile.isBeingHeld = true
+            longTile.fingerY = location.y
+            heldLongTile = longTile
+            heldTouchLocation = location
+
+            // Play the sustained notes (lasts until tile is released)
+            AudioManager.shared.playSustainedNotes(longTile.midiNotes)
+
+            // Immediately complete the first segment (like tapping a normal tile)
+            longTile.completeFirstSegment()
+            score += 1
+            updateScoreDisplay()
+        } else if let tile = findTile(at: location) {
+            if tile.isLongTile {
+                // Tapped a long tile but NOT at bottom segment - ignore
+            } else {
+                handleTileTap(tile)
+            }
+        } else if isTappedTile(at: location) {
+            // Tapped a ghost tile - ignore it
+        } else if isHeldLongTile(at: location) {
+            // Touching the currently held long tile - ignore
+        } else {
+            triggerGameOver()
         }
     }
 
@@ -335,8 +404,25 @@ class GameScene: SKScene {
     }
 
     private func handleTileTap(_ tile: TileNode) {
-        // Play the tile's note with duration from MIDI file
-        AudioManager.shared.playShortNote(tile.midiNote, duration: tile.noteDuration)
+        // For double tile pairs: first tap plays first note, second tap plays second note
+        // This ensures musical order is preserved regardless of which physical tile is tapped first
+        if tile.isDoubleTilePair, let pairNotes = tile.pairNotes, let pairDurations = tile.pairDurations {
+            // Check if sibling is still in activeTiles
+            let siblingStillActive = tile.siblingTile.map { sibling in
+                activeTiles.contains(where: { $0 === sibling })
+            } ?? false
+
+            if siblingStillActive {
+                // First tap of the pair - play the first note in musical order
+                AudioManager.shared.playShortNotes(pairNotes[0], duration: pairDurations[0])
+            } else {
+                // Second tap of the pair - play the second note in musical order
+                AudioManager.shared.playShortNotes(pairNotes[1], duration: pairDurations[1])
+            }
+        } else {
+            // Normal tile - play its assigned notes
+            AudioManager.shared.playShortNotes(tile.midiNotes, duration: tile.noteDuration)
+        }
 
         // Make tile transparent
         tile.makeTransparent()
@@ -350,12 +436,12 @@ class GameScene: SKScene {
     }
 
     private func completeLongTile(_ tile: TileNode) {
-        // If tile was fully completed, let the note decay naturally
+        // If tile was fully completed, let the notes decay naturally
         // If released early, stop immediately
         if tile.isFullyCompleted() {
-            AudioManager.shared.stopNoteAfterDelay(tile.midiNote, delay: tile.noteDuration)
+            AudioManager.shared.stopNotesAfterDelay(tile.midiNotes, delay: tile.noteDuration)
         } else {
-            AudioManager.shared.stopNote(tile.midiNote)
+            AudioManager.shared.stopNotes(tile.midiNotes)
         }
 
         // Tile is already transparent from segment completion
@@ -376,9 +462,9 @@ class GameScene: SKScene {
     // MARK: - Game Over
 
     private func triggerGameOver() {
-        // Stop any sustained note if holding a long tile
+        // Stop any sustained notes if holding a long tile
         if let heldTile = heldLongTile {
-            AudioManager.shared.stopNote(heldTile.midiNote)
+            AudioManager.shared.stopNotes(heldTile.midiNotes)
             heldLongTile = nil
         }
 
@@ -423,6 +509,16 @@ class GameScene: SKScene {
         restartButton.zPosition = 201
         restartButton.name = "restartButton"
         addChild(restartButton)
+
+        // Exit button
+        let exitButton = SKLabelNode(text: "Exit")
+        exitButton.fontName = "Helvetica-Bold"
+        exitButton.fontSize = 36
+        exitButton.fontColor = .white
+        exitButton.position = CGPoint(x: size.width / 2, y: size.height / 2 - 120)
+        exitButton.zPosition = 201
+        exitButton.name = "exitButton"
+        addChild(exitButton)
     }
 
     // MARK: - Restart
@@ -450,10 +546,11 @@ class GameScene: SKScene {
         childNode(withName: "gameOverLabel")?.removeFromParent()
         childNode(withName: "finalScoreLabel")?.removeFromParent()
         childNode(withName: "restartButton")?.removeFromParent()
+        childNode(withName: "exitButton")?.removeFromParent()
 
         // Reset game state
         score = 0
-        currentSpeed = GameConfig.initialScrollSpeed
+        currentSpeed = initialSpeed  // Reset to song's base tempo speed
         lastUpdateTime = 0
 
         // Reset beatmap state
@@ -467,6 +564,17 @@ class GameScene: SKScene {
         // Go back to waiting state with Play tile
         gameState = .waiting
         showStartScreen()
+    }
+
+    // MARK: - Navigation
+
+    private func exitToSongList() {
+        AudioManager.shared.stopAllNotes()
+
+        let songListScene = SongListScene(size: size)
+        songListScene.scaleMode = scaleMode
+        let transition = SKTransition.push(with: .right, duration: 0.3)
+        view?.presentScene(songListScene, transition: transition)
     }
 
     // MARK: - Tile Spawning
@@ -507,32 +615,96 @@ class GameScene: SKScene {
         }
     }
 
-    private func spawnTileForNote(_ note: NoteEvent, at yPosition: CGFloat) -> Int {
-        // Find the topmost tile to avoid spawning in same column
-        let topmostActiveTile = activeTiles.max(by: { $0.position.y < $1.position.y })
+    // Column pairs for double tiles
+    private static let edgeColumns = [0, 3]    // 1st and 4th columns
+    private static let middleColumns = [1, 2]  // 2nd and 3rd columns
 
-        // Randomly select column, excluding the topmost tile's column
+    private func spawnTileForNote(_ note: NoteEvent, at yPosition: CGFloat) -> Int {
+        // Find the topmost tile(s) to avoid spawning in same column
+        // Check both active and tapped tiles (tapped tiles may still be the topmost row)
+        let allTiles = activeTiles + tappedTiles
+        let topmostY = allTiles.map { $0.position.y }.max() ?? playTile?.position.y ?? -1000
+        let topmostTiles = allTiles.filter { abs($0.position.y - topmostY) < 1 }
+        let topmostColumns = Set(topmostTiles.map { $0.column })
+
+        // Handle double tile spawning with special column constraints
+        if note.isDoubleTile, let secondNotes = note.secondTileMidiNotes {
+            // Double tiles spawn either on edges (0,3) or middle (1,2)
+            // Must avoid columns used by topmost tiles
+            let useEdges: Bool
+            if topmostColumns.isEmpty {
+                // No previous tiles - pick randomly
+                useEdges = Bool.random()
+            } else if topmostColumns.contains(0) || topmostColumns.contains(3) {
+                // Previous tile(s) on edge - use middle
+                useEdges = false
+            } else {
+                // Previous tile(s) in middle - use edges
+                useEdges = true
+            }
+
+            let columns = useEdges ? GameScene.edgeColumns : GameScene.middleColumns
+
+            // Store both notes in musical order - first tap plays first note, second tap plays second
+            let pairNotes: [[UInt8]] = [note.midiNotes, secondNotes]
+            let pairDurations: [TimeInterval] = [note.noteDuration, note.secondTileNoteDuration ?? 0.5]
+
+            let firstTile = TileNode(
+                column: columns[0],
+                size: tileSize,
+                tileLength: 1,
+                midiNotes: note.midiNotes,
+                noteDuration: note.noteDuration
+            )
+            firstTile.pairNotes = pairNotes
+            firstTile.pairDurations = pairDurations
+            firstTile.position = CGPoint(x: columnPositions[columns[0]], y: yPosition)
+            addChild(firstTile)
+            activeTiles.append(firstTile)
+
+            let secondTile = TileNode(
+                column: columns[1],
+                size: tileSize,
+                tileLength: 1,
+                midiNotes: secondNotes,
+                noteDuration: note.secondTileNoteDuration ?? 0.5
+            )
+            secondTile.pairNotes = pairNotes
+            secondTile.pairDurations = pairDurations
+            secondTile.position = CGPoint(x: columnPositions[columns[1]], y: yPosition)
+            addChild(secondTile)
+            activeTiles.append(secondTile)
+
+            // Link them as siblings
+            firstTile.siblingTile = secondTile
+            secondTile.siblingTile = firstTile
+
+            return 1
+        }
+
+        // Single tile spawning - avoid all columns from topmost row
         var availableColumns = Array(0..<GameConfig.columnCount)
 
-        if let excludeColumn = topmostActiveTile?.column {
-            availableColumns.removeAll { $0 == excludeColumn }
+        if !topmostColumns.isEmpty {
+            availableColumns.removeAll { topmostColumns.contains($0) }
         } else if let excludeColumn = playTile?.column {
             availableColumns.removeAll { $0 == excludeColumn }
         }
 
-        let column = availableColumns.randomElement()!
+        // If all columns are taken (shouldn't happen with 4 columns and max 2 tiles per row)
+        // fall back to any column
+        let column = availableColumns.randomElement() ?? Int.random(in: 0..<GameConfig.columnCount)
 
-        // Determine tile length based on gap to next note
+        // Determine tile length based on gap to next note (relative to song's average gap)
         let tileLength: Int
-        if note.gapToNextNote > GameConfig.longTileGapThreshold {
-            let calculatedLength = Int(round(note.gapToNextNote / GameConfig.tileSegmentDuration))
-            // If calculation gives < 2, just make it a normal tile
+        if note.gapToNextNote > longTileThreshold {
+            let calculatedLength = Int(round(note.gapToNextNote / segmentDuration))
             tileLength = calculatedLength >= 2 ? min(calculatedLength, GameConfig.longTileMaxLength) : 1
         } else {
             tileLength = 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNote: note.midiNote, noteDuration: note.noteDuration)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: note.midiNotes, noteDuration: note.noteDuration)
 
         // Position tile - for long tiles, the center is higher due to larger size
         let tileCenterY = yPosition + (CGFloat(tileLength - 1) * tileSize.height) / 2
@@ -564,11 +736,8 @@ class GameScene: SKScene {
 
         guard deltaTime > 0 else { return }
 
-        // Increase speed over time
-        currentSpeed = min(
-            currentSpeed + GameConfig.speedIncreaseRate * CGFloat(deltaTime),
-            GameConfig.maxScrollSpeed
-        )
+        // Increase speed over time (no cap - speed increases indefinitely)
+        currentSpeed += GameConfig.speedIncreaseRate * CGFloat(deltaTime)
 
         // Move all tiles down
         let moveDistance = currentSpeed * CGFloat(deltaTime)

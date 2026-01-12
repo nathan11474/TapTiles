@@ -10,10 +10,11 @@ struct GameConfig {
     // Grid layout
     static let columnCount: Int = 4
 
-    // Scrolling speed (points per second)
-    static let initialScrollSpeed: CGFloat = 1700.0
-    static let maxScrollSpeed: CGFloat = 2500.0
-    static let speedIncreaseRate: CGFloat = 5.0
+    // Scrolling speed
+    // Initial speed is now calculated from song tempo in GameScene
+    // (1700 pts/sec at 120 BPM, scaled linearly with tempo)
+    // No max speed - speed increases indefinitely
+    static let speedIncreaseRate: CGFloat = 5.0  // Points per second increase rate
 
     // Target number of tiles visible on screen
     static let visibleTileCount: CGFloat = 4.3
@@ -51,16 +52,21 @@ struct GameConfig {
 
     // MARK: - Beatmap Configuration
 
-    // Threshold in seconds - gaps longer than this become long tiles
-    // A normal tile takes roughly one "beat" of time to pass through
-    // If the gap to the next note is longer, we fill it with a long tile
-    static let longTileGapThreshold: TimeInterval = 0.5
+    // Long tile threshold as a multiplier of the song's average gap
+    // Gaps longer than (averageGap × this multiplier) become long tiles
+    // e.g., 1.5 means gaps 50% longer than average trigger long tiles
+    static let longTileGapMultiplier: Double = 1.5
+
+    // Double tile threshold - gaps shorter than (averageGap × this multiplier)
+    // spawn two tiles in a row (for fast "key spam" sections)
+    // e.g., 0.5 means gaps half the average trigger double tiles
+    static let doubleTileGapMultiplier: Double = 0.5
+
+    // Each segment of a long tile represents this multiple of the average gap
+    // e.g., 1.0 means each segment = one average gap duration
+    static let tileSegmentMultiplier: Double = 1.0
 
     // How far ahead (in seconds) to spawn tiles before they need to be tapped
     // This gives the tile time to scroll from top to bottom of screen
     static let spawnLeadTime: TimeInterval = 2.0
-
-    // How much music time (in seconds) each tile segment represents
-    // This is independent of scroll speed - it's purely about music timing ratios
-    static let tileSegmentDuration: TimeInterval = 0.4
 }

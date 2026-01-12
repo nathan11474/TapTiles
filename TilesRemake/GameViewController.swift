@@ -13,8 +13,8 @@ class GameViewController: UIViewController {
 
         guard let view = self.view as? SKView else { return }
 
-        // Create scene programmatically with view bounds
-        let scene = GameScene(size: view.bounds.size)
+        // Start with home screen
+        let scene = HomeScene(size: view.bounds.size)
         scene.scaleMode = .resizeFill
 
         view.presentScene(scene)

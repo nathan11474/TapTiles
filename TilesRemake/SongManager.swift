@@ -1,0 +1,96 @@
+import Foundation
+import CoreGraphics
+
+// MARK: - Song Manager
+
+/// Singleton that discovers and manages available songs
+class SongManager {
+    static let shared = SongManager()
+
+    private(set) var availableSongs: [SongInfo] = []
+    private var songSettings: SongSettingsFile = [:]
+
+    private init() {
+        loadSongSettings()
+        loadAvailableSongs()
+    }
+
+    /// Reload songs from bundle (useful if songs are added dynamically)
+    func reload() {
+        loadSongSettings()
+        loadAvailableSongs()
+    }
+
+    /// Load custom song settings from song-settings.json
+    private func loadSongSettings() {
+        songSettings = [:]
+
+        // Try Songs subdirectory first, then bundle root
+        let possibleURLs = [
+            Bundle.main.url(forResource: "song-settings", withExtension: "json", subdirectory: "Songs"),
+            Bundle.main.url(forResource: "song-settings", withExtension: "json")
+        ]
+
+        for possibleURL in possibleURLs {
+            guard let url = possibleURL else { continue }
+
+            do {
+                let data = try Data(contentsOf: url)
+                songSettings = try JSONDecoder().decode(SongSettingsFile.self, from: data)
+                print("SongManager: Loaded settings for \(songSettings.count) song(s) from \(url.lastPathComponent)")
+                return
+            } catch {
+                print("SongManager: Failed to load song-settings.json: \(error)")
+            }
+        }
+
+        print("SongManager: No song-settings.json found, using default speeds")
+    }
+
+    private func loadAvailableSongs() {
+        availableSongs = []
+
+        // Try to load from Songs subdirectory first
+        if let urls = Bundle.main.urls(forResourcesWithExtension: "mid", subdirectory: "Songs") {
+            for url in urls {
+                let songId = url.deletingPathExtension().lastPathComponent
+                let settings = songSettings[songId]
+                let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
+                let startFromNote = settings?.startFromNote
+                availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
+            }
+        }
+
+        // Fallback: search bundle root for .mid files
+        if availableSongs.isEmpty {
+            if let urls = Bundle.main.urls(forResourcesWithExtension: "mid", subdirectory: nil) {
+                for url in urls {
+                    let songId = url.deletingPathExtension().lastPathComponent
+                    let settings = songSettings[songId]
+                    let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
+                    let startFromNote = settings?.startFromNote
+                    availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
+                }
+            }
+        }
+
+        // Sort alphabetically by title
+        availableSongs.sort { $0.title < $1.title }
+
+        print("SongManager: Found \(availableSongs.count) song(s)")
+        for song in availableSongs {
+            var extras: [String] = []
+            if let speed = song.customSpeed {
+                extras.append("speed: \(Int(speed))")
+            }
+            if let startNote = song.startFromNote {
+                extras.append("startFromNote: \(startNote)")
+            }
+            if extras.isEmpty {
+                print("  - \(song.title) (\(song.id))")
+            } else {
+                print("  - \(song.title) (\(song.id)) [\(extras.joined(separator: ", "))]")
+            }
+        }
+    }
+}

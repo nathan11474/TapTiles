@@ -89,11 +89,12 @@ class AudioManager {
         return newGeneration
     }
 
+    // MARK: - Single Note Methods
+
     /// Play a sustained note (for long tiles) - must call stopNote() to end
     func playSustainedNote(_ note: UInt8, velocity: UInt8 = 127) {
         // Increment generation to invalidate any pending stop commands for this note
         _ = incrementGeneration(for: note)
-        print("AudioManager: Playing SUSTAINED note \(note)")
         sampler.startNote(note, withVelocity: velocity, onChannel: 0)
     }
 
@@ -123,6 +124,36 @@ class AudioManager {
             // Only stop if the generation hasn't changed
             guard let self = self, self.noteGenerations[note] == generation else { return }
             self.sampler.stopNote(note, onChannel: 0)
+        }
+    }
+
+    // MARK: - Chord Methods (multiple notes)
+
+    /// Play multiple sustained notes (chord for long tiles) - must call stopNotes() to end
+    func playSustainedNotes(_ notes: [UInt8], velocity: UInt8 = 127) {
+        for note in notes {
+            playSustainedNote(note, velocity: velocity)
+        }
+    }
+
+    /// Play multiple short notes (chord for normal tiles)
+    func playShortNotes(_ notes: [UInt8], velocity: UInt8 = 100, duration: TimeInterval = 0.5) {
+        for note in notes {
+            playShortNote(note, velocity: velocity, duration: duration)
+        }
+    }
+
+    /// Stop multiple notes immediately
+    func stopNotes(_ notes: [UInt8]) {
+        for note in notes {
+            stopNote(note)
+        }
+    }
+
+    /// Stop multiple notes after a delay (for natural decay)
+    func stopNotesAfterDelay(_ notes: [UInt8], delay: TimeInterval) {
+        for note in notes {
+            stopNoteAfterDelay(note, delay: delay)
         }
     }
 
