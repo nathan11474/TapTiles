@@ -38,12 +38,34 @@ class GameScene: SKScene {
     private var heldLongTile: TileNode?
     private var heldTouchLocation: CGPoint = .zero  // Where the finger is during hold
 
+    // Beatmap properties
+    private var beatmap: Beatmap?
+    private var currentNoteIndex: Int = 0
+    private var songStartTime: TimeInterval = 0
+
     // MARK: - Scene Lifecycle
 
     override func didMove(to view: SKView) {
         backgroundColor = .white
+        AudioManager.shared.setup()
+        loadBeatmap()
         setupLayout()
         showStartScreen()
+    }
+
+    private func loadBeatmap() {
+        guard let url = Bundle.main.url(forResource: "song", withExtension: "mid") else {
+            print("GameScene: Could not find song.mid in bundle")
+            return
+        }
+
+        let parser = MidiParser()
+        if let loadedBeatmap = parser.parse(url: url) {
+            beatmap = loadedBeatmap
+            print("GameScene: Loaded beatmap '\(loadedBeatmap.title)' with \(loadedBeatmap.notes.count) notes, duration: \(loadedBeatmap.totalDuration)s")
+        } else {
+            print("GameScene: Failed to parse MIDI file")
+        }
     }
 
     // MARK: - Layout Setup
@@ -71,19 +93,35 @@ class GameScene: SKScene {
     // MARK: - Start Screen
 
     private func showStartScreen() {
+        // Reset note index for new game
+        currentNoteIndex = 0
+
         // Create a "Play" tile at the bottom of the screen
         let column = Int.random(in: 0..<GameConfig.columnCount)
 
-        // Determine if this should be a long tile (same logic as spawnRow)
-        let isLongTile = CGFloat.random(in: 0...1) < GameConfig.longTileSpawnChance
+        // Get the first note from the beatmap
+        let firstNote = beatmap?.notes.first
+        let midiNote = firstNote?.midiNote ?? GameConfig.randomNote()
+
+        // Determine tile length based on gap to next note (if beatmap exists)
         let tileLength: Int
-        if isLongTile {
-            tileLength = Int.random(in: GameConfig.longTileMinLength...GameConfig.longTileMaxLength)
+        if let note = firstNote, note.gapToNextNote > GameConfig.longTileGapThreshold {
+            let calculatedLength = Int(round(note.gapToNextNote / GameConfig.tileSegmentDuration))
+            // If calculation gives < 2, just make it a normal tile
+            tileLength = calculatedLength >= 2 ? min(calculatedLength, GameConfig.longTileMaxLength) : 1
         } else {
             tileLength = 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength)
+        // Get note duration for audio decay
+        let noteDuration = firstNote?.noteDuration ?? 0.5
+
+        // First note is now represented by the Play tile
+        if beatmap != nil {
+            currentNoteIndex = 1
+        }
+
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNote: midiNote, noteDuration: noteDuration)
 
         // Position at the bottom of the screen (so bottom edge touches screen bottom)
         // For long tiles, the center is higher due to larger size
@@ -115,6 +153,7 @@ class GameScene: SKScene {
     private func startGame() {
         // Handle the play tile like a normal tile tap (for non-long tiles)
         if let tile = playTile {
+            AudioManager.shared.playShortNote(tile.midiNote, duration: tile.noteDuration)
             tile.makeTransparent()
             tappedTiles.append(tile)
             score += 1
@@ -122,6 +161,7 @@ class GameScene: SKScene {
         playTile = nil
 
         gameState = .playing
+        songStartTime = 0  // Will be set on first update
         setupScoreLabel()
         updateScoreDisplay()
     }
@@ -129,6 +169,7 @@ class GameScene: SKScene {
     private func startGameWithLongPlayTile(_ tile: TileNode, touchLocation: CGPoint) {
         // Start the game
         gameState = .playing
+        songStartTime = 0  // Will be set on first update
         setupScoreLabel()
 
         // Add Play tile to active tiles so it's tracked during gameplay
@@ -140,6 +181,9 @@ class GameScene: SKScene {
         tile.fingerY = touchLocation.y
         heldLongTile = tile
         heldTouchLocation = touchLocation
+
+        // Play the sustained note (lasts until tile is released)
+        AudioManager.shared.playSustainedNote(tile.midiNote)
 
         // Complete the first segment and award 1 point
         tile.completeFirstSegment()
@@ -197,6 +241,9 @@ class GameScene: SKScene {
                 longTile.fingerY = location.y
                 heldLongTile = longTile
                 heldTouchLocation = location
+
+                // Play the sustained note (lasts until tile is released)
+                AudioManager.shared.playSustainedNote(longTile.midiNote)
 
                 // Immediately complete the first segment (like tapping a normal tile)
                 longTile.completeFirstSegment()
@@ -288,6 +335,9 @@ class GameScene: SKScene {
     }
 
     private func handleTileTap(_ tile: TileNode) {
+        // Play the tile's note with duration from MIDI file
+        AudioManager.shared.playShortNote(tile.midiNote, duration: tile.noteDuration)
+
         // Make tile transparent
         tile.makeTransparent()
 
@@ -300,6 +350,14 @@ class GameScene: SKScene {
     }
 
     private func completeLongTile(_ tile: TileNode) {
+        // If tile was fully completed, let the note decay naturally
+        // If released early, stop immediately
+        if tile.isFullyCompleted() {
+            AudioManager.shared.stopNoteAfterDelay(tile.midiNote, delay: tile.noteDuration)
+        } else {
+            AudioManager.shared.stopNote(tile.midiNote)
+        }
+
         // Tile is already transparent from segment completion
         tile.makeTransparent()
 
@@ -318,6 +376,12 @@ class GameScene: SKScene {
     // MARK: - Game Over
 
     private func triggerGameOver() {
+        // Stop any sustained note if holding a long tile
+        if let heldTile = heldLongTile {
+            AudioManager.shared.stopNote(heldTile.midiNote)
+            heldLongTile = nil
+        }
+
         gameState = .gameOver
         showGameOverScreen()
     }
@@ -364,6 +428,9 @@ class GameScene: SKScene {
     // MARK: - Restart
 
     private func restartGame() {
+        // Stop all playing notes
+        AudioManager.shared.stopAllNotes()
+
         // Remove all tiles
         for tile in activeTiles {
             tile.removeFromParent()
@@ -389,6 +456,10 @@ class GameScene: SKScene {
         currentSpeed = GameConfig.initialScrollSpeed
         lastUpdateTime = 0
 
+        // Reset beatmap state
+        currentNoteIndex = 0
+        songStartTime = 0
+
         // Remove score label (will be re-added when game starts)
         scoreLabel?.removeFromParent()
         scoreLabel = nil
@@ -404,60 +475,75 @@ class GameScene: SKScene {
         // Set spawn threshold - spawn new tile when topmost tile drops below this Y
         spawnThreshold = size.height - tileSize.height / 2
 
-        // Start spawning from just above the Play tile
-        // Play tile's top edge depends on its size (could be a long tile)
-        guard let tile = playTile else { return }
-        let playTileTop = tile.position.y + tile.size.height / 2
-        var currentY = playTileTop + tileSize.height / 2  // Center of first tile above Play tile
+        guard beatmap != nil, let tile = playTile else { return }
 
-        // Spawn tiles until we're past the top of the screen + buffer
-        while currentY < size.height + tileSize.height * 3 {
-            let tileUnits = spawnRow(at: currentY)
+        // Start spawning from just above the Play tile
+        let playTileTop = tile.position.y + tile.size.height / 2
+        var currentY = playTileTop + tileSize.height / 2
+
+        // Pre-spawn tiles for notes that should be visible at game start
+        // Calculate how many seconds of notes should be on screen
+        let screenTimeInSeconds = GameConfig.spawnLeadTime
+
+        while currentNoteIndex < beatmap!.notes.count {
+            let note = beatmap!.notes[currentNoteIndex]
+
+            // Check if this note should be pre-spawned (visible at start)
+            if note.time > screenTimeInSeconds {
+                break
+            }
+
+            let tileUnits = spawnTileForNote(note, at: currentY)
             currentY += tileSize.height * CGFloat(tileUnits)
+            currentNoteIndex += 1
+        }
+
+        // Fill any remaining screen space with upcoming notes
+        while currentY < size.height + tileSize.height * 3 && currentNoteIndex < beatmap!.notes.count {
+            let note = beatmap!.notes[currentNoteIndex]
+            let tileUnits = spawnTileForNote(note, at: currentY)
+            currentY += tileSize.height * CGFloat(tileUnits)
+            currentNoteIndex += 1
         }
     }
 
-    private func spawnRow(at yPosition: CGFloat) -> Int {
-        // Find the topmost tile (highest Y) to avoid spawning in same column
-        // Check active tiles, tapped tiles, and the play tile
+    private func spawnTileForNote(_ note: NoteEvent, at yPosition: CGFloat) -> Int {
+        // Find the topmost tile to avoid spawning in same column
         let topmostActiveTile = activeTiles.max(by: { $0.position.y < $1.position.y })
 
         // Randomly select column, excluding the topmost tile's column
         var availableColumns = Array(0..<GameConfig.columnCount)
 
-        // Exclude the topmost active tile's column
         if let excludeColumn = topmostActiveTile?.column {
             availableColumns.removeAll { $0 == excludeColumn }
-        }
-        // Also exclude the play tile's column (for initial spawn)
-        else if let excludeColumn = playTile?.column {
+        } else if let excludeColumn = playTile?.column {
             availableColumns.removeAll { $0 == excludeColumn }
         }
 
-        let blackTileColumn = availableColumns.randomElement()!
+        let column = availableColumns.randomElement()!
 
-        // Determine if this should be a long tile
-        let isLongTile = CGFloat.random(in: 0...1) < GameConfig.longTileSpawnChance
+        // Determine tile length based on gap to next note
         let tileLength: Int
-        if isLongTile {
-            tileLength = Int.random(in: GameConfig.longTileMinLength...GameConfig.longTileMaxLength)
+        if note.gapToNextNote > GameConfig.longTileGapThreshold {
+            let calculatedLength = Int(round(note.gapToNextNote / GameConfig.tileSegmentDuration))
+            // If calculation gives < 2, just make it a normal tile
+            tileLength = calculatedLength >= 2 ? min(calculatedLength, GameConfig.longTileMaxLength) : 1
         } else {
             tileLength = 1
         }
 
-        let tile = TileNode(column: blackTileColumn, size: tileSize, tileLength: tileLength)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNote: note.midiNote, noteDuration: note.noteDuration)
 
         // Position tile - for long tiles, the center is higher due to larger size
         let tileCenterY = yPosition + (CGFloat(tileLength - 1) * tileSize.height) / 2
         tile.position = CGPoint(
-            x: columnPositions[blackTileColumn],
+            x: columnPositions[column],
             y: tileCenterY
         )
 
         addChild(tile)
         activeTiles.append(tile)
 
-        // Return the number of tile units spawned (for spawn threshold adjustment)
         return tileLength
     }
 
@@ -470,6 +556,7 @@ class GameScene: SKScene {
         let deltaTime: TimeInterval
         if lastUpdateTime == 0 {
             deltaTime = 0
+            songStartTime = currentTime  // Record song start on first update
         } else {
             deltaTime = currentTime - lastUpdateTime
         }
@@ -532,15 +619,45 @@ class GameScene: SKScene {
             }
         }
 
-        // Spawn new tile when topmost tile has moved down enough
-        if let topmostTile = activeTiles.max(by: { $0.position.y < $1.position.y }) {
-            // Use the top edge of the topmost tile
-            let topmostTileTop = topmostTile.position.y + topmostTile.size.height / 2
-            if topmostTileTop <= spawnThreshold + tileSize.height / 2 {
-                // Spawn at the top of the topmost tile
-                let newY = topmostTileTop + tileSize.height / 2
-                _ = spawnRow(at: newY)
+        // Beatmap-driven spawning
+        if let beatmap = beatmap {
+            // Spawn tiles when topmost tile has moved down enough and there are more notes
+            while currentNoteIndex < beatmap.notes.count {
+                // Find the topmost tile - check active tiles first, then tapped tiles as fallback
+                let topmostActive = activeTiles.max(by: { $0.position.y < $1.position.y })
+                let topmostTapped = tappedTiles.max(by: { $0.position.y < $1.position.y })
+
+                // Use whichever is higher (or the one that exists)
+                let topmostTile: TileNode?
+                if let active = topmostActive, let tapped = topmostTapped {
+                    topmostTile = active.position.y > tapped.position.y ? active : tapped
+                } else {
+                    topmostTile = topmostActive ?? topmostTapped
+                }
+
+                if let topTile = topmostTile {
+                    let topmostTileTop = topTile.position.y + topTile.size.height / 2
+                    if topmostTileTop <= spawnThreshold + tileSize.height / 2 {
+                        let note = beatmap.notes[currentNoteIndex]
+                        let newY = topmostTileTop + tileSize.height / 2
+                        _ = spawnTileForNote(note, at: newY)
+                        currentNoteIndex += 1
+                    } else {
+                        break
+                    }
+                } else {
+                    // No tiles at all - spawn at top of screen
+                    let note = beatmap.notes[currentNoteIndex]
+                    _ = spawnTileForNote(note, at: size.height + tileSize.height / 2)
+                    currentNoteIndex += 1
+                }
+            }
+
+            // Loop the song when all notes have been spawned
+            if currentNoteIndex >= beatmap.notes.count {
+                currentNoteIndex = 0  // Reset to beginning for infinite loop
             }
         }
     }
+
 }

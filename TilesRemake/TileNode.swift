@@ -9,6 +9,8 @@ class TileNode: SKSpriteNode {
     let column: Int
     let tileLength: Int  // 1 for normal tile, 2+ for long tile
     let unitHeight: CGFloat  // Height of one tile unit
+    var midiNote: UInt8 = 60  // MIDI note to play (default: middle C)
+    var noteDuration: TimeInterval = 0.5  // Duration from MIDI file for audio decay
 
     // Extra padding around tile for easier tapping
     static let hitboxPadding: CGFloat = 8.0
@@ -52,10 +54,12 @@ class TileNode: SKSpriteNode {
         return tileBottom + unitHeight
     }
 
-    init(column: Int, size: CGSize, tileLength: Int = 1) {
+    init(column: Int, size: CGSize, tileLength: Int = 1, midiNote: UInt8 = 60, noteDuration: TimeInterval = 0.5) {
         self.column = column
         self.tileLength = tileLength
         self.unitHeight = size.height
+        self.midiNote = midiNote
+        self.noteDuration = noteDuration
 
         // Calculate actual size based on tile length
         let actualHeight = size.height * CGFloat(tileLength)
@@ -152,10 +156,10 @@ class TileNode: SKSpriteNode {
 
             // Get the segment's position in scene coordinates
             let segmentSceneY = position.y + segment.position.y
-            let segmentTop = segmentSceneY + unitHeight / 2
+            let segmentBottom = segmentSceneY - unitHeight / 2
 
-            // If the segment's top has scrolled past (below) the finger, it's completed
-            if segmentTop < fingerY {
+            // If the segment's bottom has scrolled past (below) the finger, it's completed
+            if segmentBottom < fingerY {
                 // Complete this segment
                 segment.color = TileNode.completedSegmentColor
                 segment.children.forEach { $0.removeFromParent() }  // Remove border
