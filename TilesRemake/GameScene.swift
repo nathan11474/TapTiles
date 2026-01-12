@@ -54,9 +54,8 @@ class GameScene: SKScene {
     private var scoreLabel: SKLabelNode?
     private var tappedTiles: [TileNode] = []
 
-    // Long tile tracking
-    private var heldLongTile: TileNode?
-    private var heldTouchLocation: CGPoint = .zero  // Where the finger is during hold
+    // Long tile tracking (supports multiple simultaneous holds for double-long-tiles)
+    private var heldLongTiles: [TileNode] = []
 
     // Beatmap properties
     private var beatmap: Beatmap?
@@ -218,7 +217,7 @@ class GameScene: SKScene {
         updateScoreDisplay()
     }
 
-    private func startGameWithLongPlayTile(_ tile: TileNode, touchLocation: CGPoint) {
+    private func startGameWithLongPlayTile(_ tile: TileNode, touchLocation: CGPoint, touch: UITouch) {
         // Start the game
         gameState = .playing
         songStartTime = 0  // Will be set on first update
@@ -231,8 +230,10 @@ class GameScene: SKScene {
         // Start holding the long tile (same as normal long tile behavior)
         tile.isBeingHeld = true
         tile.fingerY = touchLocation.y
-        heldLongTile = tile
-        heldTouchLocation = touchLocation
+        tile.holdingTouch = touch
+        tile.currentlyPlayingNotes = tile.midiNotes
+        tile.currentlyPlayingDuration = tile.noteDuration
+        heldLongTiles.append(tile)
 
         // Play the sustained notes (lasts until tile is released)
         AudioManager.shared.playSustainedNotes(tile.midiNotes)
@@ -274,7 +275,7 @@ class GameScene: SKScene {
             if tile.isLongTile {
                 // Long Play tile - must tap bottom segment and hold like normal long tiles
                 if tile.isBottomSegmentTapped(at: location) {
-                    startGameWithLongPlayTile(tile, touchLocation: location)
+                    startGameWithLongPlayTile(tile, touchLocation: location, touch: touch)
                 }
             } else {
                 // Normal Play tile - single tap to start
@@ -287,7 +288,7 @@ class GameScene: SKScene {
             // Process ALL touches to handle simultaneous taps (e.g., double tiles)
             for touch in touches {
                 let location = touch.location(in: self)
-                handlePlayingTouch(at: location)
+                handlePlayingTouch(at: location, touch: touch)
 
                 // Stop processing if game ended
                 if gameState != .playing { break }
@@ -309,17 +310,41 @@ class GameScene: SKScene {
     }
 
     /// Handle a single touch during gameplay
-    private func handlePlayingTouch(at location: CGPoint) {
+    private func handlePlayingTouch(at location: CGPoint, touch: UITouch) {
         // First check if tapping a long tile's bottom segment
         if let longTile = findLongTileBottomSegment(at: location) {
             // Start holding the long tile
             longTile.isBeingHeld = true
             longTile.fingerY = location.y
-            heldLongTile = longTile
-            heldTouchLocation = location
+            longTile.holdingTouch = touch
+            heldLongTiles.append(longTile)
 
-            // Play the sustained notes (lasts until tile is released)
-            AudioManager.shared.playSustainedNotes(longTile.midiNotes)
+            // For double-long-tile pairs: first tap plays first note, second tap plays second note
+            if longTile.isDoubleTilePair, let pairNotes = longTile.pairNotes, let pairDurations = longTile.pairDurations {
+                // Check if sibling is NOT yet being held (i.e., we're the first to be tapped)
+                // For long tiles, we check heldLongTiles rather than activeTiles because
+                // long tiles stay in activeTiles while being held
+                let siblingNotYetHeld = longTile.siblingTile.map { sibling in
+                    !heldLongTiles.contains(where: { $0 === sibling })
+                } ?? true
+
+                if siblingNotYetHeld {
+                    // First tap - play first note
+                    longTile.currentlyPlayingNotes = pairNotes[0]
+                    longTile.currentlyPlayingDuration = pairDurations[0]
+                    AudioManager.shared.playSustainedNotes(pairNotes[0])
+                } else {
+                    // Second tap - play second note
+                    longTile.currentlyPlayingNotes = pairNotes[1]
+                    longTile.currentlyPlayingDuration = pairDurations[1]
+                    AudioManager.shared.playSustainedNotes(pairNotes[1])
+                }
+            } else {
+                // Normal long tile - play its notes
+                longTile.currentlyPlayingNotes = longTile.midiNotes
+                longTile.currentlyPlayingDuration = longTile.noteDuration
+                AudioManager.shared.playSustainedNotes(longTile.midiNotes)
+            }
 
             // Immediately complete the first segment (like tapping a normal tile)
             longTile.completeFirstSegment()
@@ -334,35 +359,47 @@ class GameScene: SKScene {
         } else if isTappedTile(at: location) {
             // Tapped a ghost tile - ignore it
         } else if isHeldLongTile(at: location) {
-            // Touching the currently held long tile - ignore
+            // Touching a currently held long tile - ignore
         } else {
             triggerGameOver()
         }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard gameState == .playing, let heldTile = heldLongTile else { return }
-        guard let touch = touches.first else { return }
-        let location = touch.location(in: self)
+        guard gameState == .playing, !heldLongTiles.isEmpty else { return }
 
-        // Don't update heldTouchLocation - segment completion is based on initial touch position
-        // Only check X bounds to ensure finger stays in the tile's column
-        let tileLeft = heldTile.position.x - heldTile.size.width / 2 - TileNode.hitboxPadding
-        let tileRight = heldTile.position.x + heldTile.size.width / 2 + TileNode.hitboxPadding
+        // Check each moving touch against its associated tile
+        for touch in touches {
+            let location = touch.location(in: self)
 
-        if location.x < tileLeft || location.x > tileRight {
-            // Finger left the tile's column - game over
-            heldTile.isBeingHeld = false
-            heldLongTile = nil
-            triggerGameOver()
+            // Find the tile being held by this touch
+            guard let heldTile = heldLongTiles.first(where: { $0.holdingTouch === touch }) else {
+                continue
+            }
+
+            // Check X bounds to ensure finger stays in the tile's column
+            let tileLeft = heldTile.position.x - heldTile.size.width / 2 - TileNode.hitboxPadding
+            let tileRight = heldTile.position.x + heldTile.size.width / 2 + TileNode.hitboxPadding
+
+            if location.x < tileLeft || location.x > tileRight {
+                // Finger left the tile's column - game over
+                heldTile.isBeingHeld = false
+                heldLongTiles.removeAll { $0 === heldTile }
+                triggerGameOver()
+                return
+            }
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard gameState == .playing, let heldTile = heldLongTile else { return }
+        guard gameState == .playing else { return }
 
-        // Released the long tile - complete it (user loses remaining points but no game over)
-        completeLongTile(heldTile)
+        // Complete tiles whose touches ended
+        for touch in touches {
+            if let heldTile = heldLongTiles.first(where: { $0.holdingTouch === touch }) {
+                completeLongTile(heldTile)
+            }
+        }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -399,8 +436,12 @@ class GameScene: SKScene {
     }
 
     private func isHeldLongTile(at point: CGPoint) -> Bool {
-        guard let heldTile = heldLongTile else { return false }
-        return heldTile.hitboxFrame.contains(point)
+        for heldTile in heldLongTiles {
+            if heldTile.hitboxFrame.contains(point) {
+                return true
+            }
+        }
+        return false
     }
 
     private func handleTileTap(_ tile: TileNode) {
@@ -436,12 +477,16 @@ class GameScene: SKScene {
     }
 
     private func completeLongTile(_ tile: TileNode) {
+        // Use the tracked notes (handles double-long-tile pairs correctly)
+        let notesToStop = tile.currentlyPlayingNotes ?? tile.midiNotes
+        let duration = tile.currentlyPlayingDuration ?? tile.noteDuration
+
         // If tile was fully completed, let the notes decay naturally
         // If released early, stop immediately
         if tile.isFullyCompleted() {
-            AudioManager.shared.stopNotesAfterDelay(tile.midiNotes, delay: tile.noteDuration)
+            AudioManager.shared.stopNotesAfterDelay(notesToStop, delay: duration)
         } else {
-            AudioManager.shared.stopNotes(tile.midiNotes)
+            AudioManager.shared.stopNotes(notesToStop)
         }
 
         // Tile is already transparent from segment completion
@@ -453,7 +498,8 @@ class GameScene: SKScene {
 
         // Clear held tile reference
         tile.isBeingHeld = false
-        heldLongTile = nil
+        tile.holdingTouch = nil
+        heldLongTiles.removeAll { $0 === tile }
 
         // Points already awarded per segment, no additional points needed
         updateScoreDisplay()
@@ -462,11 +508,14 @@ class GameScene: SKScene {
     // MARK: - Game Over
 
     private func triggerGameOver() {
-        // Stop any sustained notes if holding a long tile
-        if let heldTile = heldLongTile {
-            AudioManager.shared.stopNotes(heldTile.midiNotes)
-            heldLongTile = nil
+        // Stop any sustained notes if holding long tiles
+        for heldTile in heldLongTiles {
+            let notesToStop = heldTile.currentlyPlayingNotes ?? heldTile.midiNotes
+            AudioManager.shared.stopNotes(notesToStop)
+            heldTile.isBeingHeld = false
+            heldTile.holdingTouch = nil
         }
+        heldLongTiles.removeAll()
 
         gameState = .gameOver
         showGameOverScreen()
@@ -538,8 +587,8 @@ class GameScene: SKScene {
         }
         tappedTiles.removeAll()
 
-        // Clear held long tile
-        heldLongTile = nil
+        // Clear held long tiles
+        heldLongTiles.removeAll()
 
         // Remove game over UI elements
         childNode(withName: "gameOverOverlay")?.removeFromParent()
@@ -645,33 +694,45 @@ class GameScene: SKScene {
 
             let columns = useEdges ? GameScene.edgeColumns : GameScene.middleColumns
 
+            // Check if this double tile should be a long tile (based on gap after the pair)
+            let tileLength: Int
+            if note.gapToNextNote > longTileThreshold {
+                let calculatedLength = Int(round(note.gapToNextNote / segmentDuration))
+                tileLength = calculatedLength >= 2 ? min(calculatedLength, GameConfig.longTileMaxLength) : 1
+            } else {
+                tileLength = 1
+            }
+
             // Store both notes in musical order - first tap plays first note, second tap plays second
             let pairNotes: [[UInt8]] = [note.midiNotes, secondNotes]
             let pairDurations: [TimeInterval] = [note.noteDuration, note.secondTileNoteDuration ?? 0.5]
 
+            // Position for long tiles - center is higher due to larger size
+            let tileCenterY = yPosition + (CGFloat(tileLength - 1) * tileSize.height) / 2
+
             let firstTile = TileNode(
                 column: columns[0],
                 size: tileSize,
-                tileLength: 1,
+                tileLength: tileLength,
                 midiNotes: note.midiNotes,
                 noteDuration: note.noteDuration
             )
             firstTile.pairNotes = pairNotes
             firstTile.pairDurations = pairDurations
-            firstTile.position = CGPoint(x: columnPositions[columns[0]], y: yPosition)
+            firstTile.position = CGPoint(x: columnPositions[columns[0]], y: tileCenterY)
             addChild(firstTile)
             activeTiles.append(firstTile)
 
             let secondTile = TileNode(
                 column: columns[1],
                 size: tileSize,
-                tileLength: 1,
+                tileLength: tileLength,
                 midiNotes: secondNotes,
                 noteDuration: note.secondTileNoteDuration ?? 0.5
             )
             secondTile.pairNotes = pairNotes
             secondTile.pairDurations = pairDurations
-            secondTile.position = CGPoint(x: columnPositions[columns[1]], y: yPosition)
+            secondTile.position = CGPoint(x: columnPositions[columns[1]], y: tileCenterY)
             addChild(secondTile)
             activeTiles.append(secondTile)
 
@@ -679,7 +740,7 @@ class GameScene: SKScene {
             firstTile.siblingTile = secondTile
             secondTile.siblingTile = firstTile
 
-            return 1
+            return tileLength
         }
 
         // Single tile spawning - avoid all columns from topmost row
@@ -748,10 +809,10 @@ class GameScene: SKScene {
             tile.position.y -= moveDistance
         }
 
-        // Update held long tile - check for segment completion
-        if let heldTile = heldLongTile {
-            // Update segments based on finger position
-            let completedCount = heldTile.updateSegmentsForHold(fingerY: heldTouchLocation.y)
+        // Update all held long tiles - check for segment completion
+        for heldTile in heldLongTiles {
+            // Update segments based on finger position (stored on tile)
+            let completedCount = heldTile.updateSegmentsForHold(fingerY: heldTile.fingerY)
 
             // Award points for each newly completed segment
             if completedCount > 0 {
@@ -776,11 +837,11 @@ class GameScene: SKScene {
         }
 
         // Check if any tile has scrolled off the bottom - triggers game over
-        // Skip the currently held tile - its completion is handled by segment logic
+        // Skip currently held tiles - their completion is handled by segment logic
         // For long tiles, check the top of the first (bottom) segment, not the whole tile
         for tile in activeTiles {
-            if tile === heldLongTile {
-                continue  // Skip held tile
+            if heldLongTiles.contains(where: { $0 === tile }) {
+                continue  // Skip held tiles
             }
             if tile.firstSegmentTop < 0 {
                 triggerGameOver()

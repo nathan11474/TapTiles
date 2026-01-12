@@ -18,6 +18,13 @@ class TileNode: SKSpriteNode {
     var pairDurations: [TimeInterval]?  // [firstDuration, secondDuration]
     var isDoubleTilePair: Bool { return siblingTile != nil }
 
+    // For long tiles: track which notes are currently being played (set when held)
+    var currentlyPlayingNotes: [UInt8]?
+    var currentlyPlayingDuration: TimeInterval?
+
+    // Track the touch that is holding this tile (for multi-touch support)
+    weak var holdingTouch: UITouch?
+
     /// Convenience for single note (backwards compatibility)
     var midiNote: UInt8 {
         return midiNotes.first ?? 60

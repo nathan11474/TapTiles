@@ -22,7 +22,7 @@ struct GameConfig {
     // Long tile settings (for random mode fallback)
     static let longTileSpawnChance: CGFloat = 0.2  // 20% chance to spawn a long tile
     static let longTileMinLength: Int = 2          // Minimum length in tile units (random mode)
-    static let longTileMaxLength: Int = 5          // Maximum length in tile units
+    static let longTileMaxLength: Int = 50          // Maximum length in tile units
 
     // Tile dimensions (calculated relative to screen)
     static func tileSize(for screenSize: CGSize) -> CGSize {
