@@ -365,32 +365,6 @@ class GameScene: SKScene {
         }
     }
 
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard gameState == .playing, !heldLongTiles.isEmpty else { return }
-
-        // Check each moving touch against its associated tile
-        for touch in touches {
-            let location = touch.location(in: self)
-
-            // Find the tile being held by this touch
-            guard let heldTile = heldLongTiles.first(where: { $0.holdingTouch === touch }) else {
-                continue
-            }
-
-            // Check X bounds to ensure finger stays in the tile's column
-            let tileLeft = heldTile.position.x - heldTile.size.width / 2 - TileNode.hitboxPadding
-            let tileRight = heldTile.position.x + heldTile.size.width / 2 + TileNode.hitboxPadding
-
-            if location.x < tileLeft || location.x > tileRight {
-                // Finger left the tile's column - game over
-                heldTile.isBeingHeld = false
-                heldLongTiles.removeAll { $0 === heldTile }
-                triggerGameOver()
-                return
-            }
-        }
-    }
-
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard gameState == .playing else { return }
 
