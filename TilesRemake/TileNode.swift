@@ -10,17 +10,20 @@ class TileNode: SKSpriteNode {
     let tileLength: Int  // 1 for normal tile, 2+ for long tile
     let unitHeight: CGFloat  // Height of one tile unit
     var midiNotes: [UInt8] = [60]  // MIDI notes to play (multiple = chord)
-    var noteDuration: TimeInterval = 0.5  // Duration from MIDI file for audio decay
+    var noteDurations: [TimeInterval] = [0.5]  // Individual durations per note (parallel array with midiNotes)
+    var instruments: [UInt8] = [0]  // General MIDI instruments (parallel array with midiNotes)
 
     // Double tile pairing - tiles share a note queue, first tap plays first note regardless of which tile
     weak var siblingTile: TileNode?
-    var pairNotes: [[UInt8]]?           // [firstNote, secondNote] in musical order
-    var pairDurations: [TimeInterval]?  // [firstDuration, secondDuration]
+    var pairNotes: [[UInt8]]?             // [firstNotes, secondNotes] in musical order
+    var pairDurations: [[TimeInterval]]?  // [firstDurations, secondDurations] individual durations per note
+    var pairInstruments: [[UInt8]]?       // [firstInstruments, secondInstruments] for multi-instrument chords
     var isDoubleTilePair: Bool { return siblingTile != nil }
 
     // For long tiles: track which notes are currently being played (set when held)
     var currentlyPlayingNotes: [UInt8]?
-    var currentlyPlayingDuration: TimeInterval?
+    var currentlyPlayingDurations: [TimeInterval]?
+    var currentlyPlayingInstruments: [UInt8]?
 
     // Track the touch that is holding this tile (for multi-touch support)
     weak var holdingTouch: UITouch?
@@ -28,6 +31,16 @@ class TileNode: SKSpriteNode {
     /// Convenience for single note (backwards compatibility)
     var midiNote: UInt8 {
         return midiNotes.first ?? 60
+    }
+
+    /// Convenience for single instrument (backwards compatibility)
+    var instrument: UInt8 {
+        return instruments.first ?? 0
+    }
+
+    /// Convenience for max duration (backwards compatibility)
+    var noteDuration: TimeInterval {
+        return noteDurations.max() ?? 0.5
     }
 
     /// Whether this tile plays a chord
@@ -77,12 +90,13 @@ class TileNode: SKSpriteNode {
         return tileBottom + unitHeight
     }
 
-    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDuration: TimeInterval = 0.5) {
+    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], instruments: [UInt8] = [0]) {
         self.column = column
         self.tileLength = tileLength
         self.unitHeight = size.height
         self.midiNotes = midiNotes
-        self.noteDuration = noteDuration
+        self.noteDurations = noteDurations
+        self.instruments = instruments
 
         // Calculate actual size based on tile length
         let actualHeight = size.height * CGFloat(tileLength)

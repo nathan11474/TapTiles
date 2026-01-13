@@ -9,16 +9,33 @@ import AudioToolbox
 struct NoteEvent {
     let time: TimeInterval           // Seconds from song start when note should play
     let gapToNextNote: TimeInterval  // Time until NEXT note (used for tile length calculation)
-    let noteDuration: TimeInterval   // Actual note duration from MIDI (for audio decay)
+    let noteDurations: [TimeInterval] // Individual note durations from MIDI (parallel array with midiNotes)
     let midiNotes: [UInt8]           // MIDI note numbers 0-127 (multiple = chord)
+    let instruments: [UInt8]         // MIDI program numbers 0-127 (parallel array with midiNotes)
 
     // For double-tile rows (fast sections): second tile's notes
     let secondTileMidiNotes: [UInt8]?
-    let secondTileNoteDuration: TimeInterval?
+    let secondTileNoteDurations: [TimeInterval]?
+    let secondTileInstruments: [UInt8]?
 
     /// Convenience for single note
     var midiNote: UInt8 {
         return midiNotes.first ?? 60
+    }
+
+    /// Convenience for single instrument
+    var instrument: UInt8 {
+        return instruments.first ?? 0
+    }
+
+    /// Convenience for single duration (max of all durations for backwards compatibility)
+    var noteDuration: TimeInterval {
+        return noteDurations.max() ?? 0.5
+    }
+
+    /// Convenience for second tile's duration (max)
+    var secondTileNoteDuration: TimeInterval? {
+        return secondTileNoteDurations?.max()
     }
 
     /// Whether this is a chord (multiple simultaneous notes)
@@ -29,6 +46,11 @@ struct NoteEvent {
     /// Whether this event spawns two tiles (for fast sections)
     var isDoubleTile: Bool {
         return secondTileMidiNotes != nil
+    }
+
+    /// Convenience for second tile's instrument (single)
+    var secondTileInstrument: UInt8? {
+        return secondTileInstruments?.first
     }
 }
 
@@ -71,7 +93,7 @@ class MidiParser {
         print("MidiParser: Found \(trackCount) tracks")
 
         // Collect all notes from all tracks
-        var allNotes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8)] = []
+        var allNotes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] = []
 
         for i in 0..<trackCount {
             var track: MusicTrack?
@@ -123,6 +145,18 @@ class MidiParser {
         let title = url.deletingPathExtension().lastPathComponent
 
         print("MidiParser: Parsed '\(title)' - \(mergedNotes.count) events (\(doubleTileCount) double tiles), \(String(format: "%.1f", songEnd))s, trimmed mean gap: \(String(format: "%.3f", averageGap))s")
+
+        // Debug: Print instrument distribution summary
+        var instrumentCounts: [UInt8: Int] = [:]
+        for note in mergedNotes {
+            for inst in note.instruments {
+                instrumentCounts[inst, default: 0] += 1
+            }
+        }
+        print("MidiParser: Instrument distribution:")
+        for (inst, count) in instrumentCounts.sorted(by: { $0.key < $1.key }) {
+            print("  - \(gmInstrumentName(inst)): \(count) notes")
+        }
 
         DisposeMusicSequence(seq)
 
@@ -178,9 +212,16 @@ class MidiParser {
         return 120.0  // Default tempo if none found
     }
 
-    // Parse a single track, extracting note events with their durations
-    private func parseTrack(_ track: MusicTrack, tempo: Double) -> [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8)] {
-        var notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8)] = []
+    // Parse a single track, extracting note events with their durations and instruments
+    private func parseTrack(_ track: MusicTrack, tempo: Double) -> [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] {
+        var notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] = []
+
+        // First pass: collect program changes (instrument assignments) by channel
+        // Key: (channel, timeInBeats), Value: program number
+        var programChanges: [(time: MusicTimeStamp, channel: UInt8, program: UInt8)] = []
+
+        // Current program for each channel (default to 0 = Acoustic Grand Piano)
+        var channelPrograms: [UInt8: UInt8] = [:]
 
         var iterator: MusicEventIterator?
         NewMusicEventIterator(track, &iterator)
@@ -192,6 +233,7 @@ class MidiParser {
         var hasCurrentEvent: DarwinBoolean = false
         MusicEventIteratorHasCurrentEvent(iter, &hasCurrentEvent)
 
+        // First pass: collect all program changes
         while hasCurrentEvent.boolValue {
             var timestamp: MusicTimeStamp = 0
             var eventType: MusicEventType = 0
@@ -200,17 +242,18 @@ class MidiParser {
 
             MusicEventIteratorGetEventInfo(iter, &timestamp, &eventType, &eventData, &eventDataSize)
 
-            if eventType == kMusicEventType_MIDINoteMessage {
+            if eventType == kMusicEventType_MIDIChannelMessage {
                 if let data = eventData {
-                    let noteMessage = data.assumingMemoryBound(to: MIDINoteMessage.self)
-                    let midiNote = noteMessage.pointee.note
-                    let durationInBeats = Double(noteMessage.pointee.duration)
+                    let channelMessage = data.assumingMemoryBound(to: MIDIChannelMessage.self)
+                    let status = channelMessage.pointee.status
+                    let statusType = status & 0xF0
+                    let channel = status & 0x0F
 
-                    // Convert beats to seconds: (beats / bpm) * 60
-                    let timeInSeconds = (timestamp / tempo) * 60.0
-                    let durationInSeconds = (durationInBeats / tempo) * 60.0
-
-                    notes.append((time: timeInSeconds, noteDuration: durationInSeconds, midiNote: midiNote))
+                    // Program Change message (0xC0-0xCF)
+                    if statusType == 0xC0 {
+                        let program = channelMessage.pointee.data1
+                        programChanges.append((time: timestamp, channel: channel, program: program))
+                    }
                 }
             }
 
@@ -218,25 +261,77 @@ class MidiParser {
             MusicEventIteratorHasCurrentEvent(iter, &hasCurrentEvent)
         }
 
+        // Sort program changes by time
+        programChanges.sort { $0.time < $1.time }
+
+
+        // Reset iterator for second pass
         DisposeMusicEventIterator(iter)
+        NewMusicEventIterator(track, &iterator)
+
+        guard let iter2 = iterator else {
+            return notes
+        }
+
+        MusicEventIteratorHasCurrentEvent(iter2, &hasCurrentEvent)
+
+        // Second pass: collect notes with their instruments
+        while hasCurrentEvent.boolValue {
+            var timestamp: MusicTimeStamp = 0
+            var eventType: MusicEventType = 0
+            var eventData: UnsafeRawPointer?
+            var eventDataSize: UInt32 = 0
+
+            MusicEventIteratorGetEventInfo(iter2, &timestamp, &eventType, &eventData, &eventDataSize)
+
+            if eventType == kMusicEventType_MIDINoteMessage {
+                if let data = eventData {
+                    let noteMessage = data.assumingMemoryBound(to: MIDINoteMessage.self)
+                    let midiNote = noteMessage.pointee.note
+                    let channel = noteMessage.pointee.channel
+                    let durationInBeats = Double(noteMessage.pointee.duration)
+
+                    // Find the most recent program change for this channel before this note
+                    for change in programChanges where change.channel == channel && change.time <= timestamp {
+                        channelPrograms[channel] = change.program
+                    }
+
+                    // Get current program for this channel (default to 0 = piano)
+                    let instrument = channelPrograms[channel] ?? 0
+
+                    // Convert beats to seconds: (beats / bpm) * 60
+                    let timeInSeconds = (timestamp / tempo) * 60.0
+                    let durationInSeconds = (durationInBeats / tempo) * 60.0
+
+                    notes.append((time: timeInSeconds, noteDuration: durationInSeconds, midiNote: midiNote, instrument: instrument))
+                }
+            }
+
+            MusicEventIteratorNextEvent(iter2)
+            MusicEventIteratorHasCurrentEvent(iter2, &hasCurrentEvent)
+        }
+
+        DisposeMusicEventIterator(iter2)
         return notes
     }
 
     // Group notes into chords and calculate gaps
     // Notes within chordTolerance seconds of each other are considered simultaneous (a chord)
-    private func calculateDurations(notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8)], songEnd: TimeInterval) -> [NoteEvent] {
+    private func calculateDurations(notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)], songEnd: TimeInterval) -> [NoteEvent] {
         guard !notes.isEmpty else { return [] }
 
         // Tolerance for considering notes as simultaneous (in seconds)
         let chordTolerance: TimeInterval = 0.02
 
         // Group notes into chords based on timing
-        var chordGroups: [(time: TimeInterval, maxDuration: TimeInterval, midiNotes: [UInt8])] = []
+        // Stores individual durations per note (parallel arrays)
+        var chordGroups: [(time: TimeInterval, durations: [TimeInterval], midiNotes: [UInt8], instruments: [UInt8])] = []
 
-        var currentGroup: (time: TimeInterval, maxDuration: TimeInterval, midiNotes: [UInt8]) = (
+        var currentGroup: (time: TimeInterval, durations: [TimeInterval], midiNotes: [UInt8], instruments: [UInt8]) = (
             time: notes[0].time,
-            maxDuration: notes[0].noteDuration,
-            midiNotes: [notes[0].midiNote]
+            durations: [notes[0].noteDuration],
+            midiNotes: [notes[0].midiNote],
+            instruments: [notes[0].instrument]
         )
 
         for i in 1..<notes.count {
@@ -244,16 +339,18 @@ class MidiParser {
 
             // Check if this note is within tolerance of the current group's time
             if abs(note.time - currentGroup.time) <= chordTolerance {
-                // Same chord - add note and update max duration
+                // Same chord - add note with its individual duration and instrument
                 currentGroup.midiNotes.append(note.midiNote)
-                currentGroup.maxDuration = max(currentGroup.maxDuration, note.noteDuration)
+                currentGroup.durations.append(note.noteDuration)
+                currentGroup.instruments.append(note.instrument)
             } else {
                 // New chord - save current group and start new one
                 chordGroups.append(currentGroup)
                 currentGroup = (
                     time: note.time,
-                    maxDuration: note.noteDuration,
-                    midiNotes: [note.midiNote]
+                    durations: [note.noteDuration],
+                    midiNotes: [note.midiNote],
+                    instruments: [note.instrument]
                 )
             }
         }
@@ -278,10 +375,12 @@ class MidiParser {
             noteEvents.append(NoteEvent(
                 time: group.time,
                 gapToNextNote: gapToNext,
-                noteDuration: group.maxDuration,
+                noteDurations: group.durations,
                 midiNotes: group.midiNotes,
+                instruments: group.instruments,
                 secondTileMidiNotes: nil,
-                secondTileNoteDuration: nil
+                secondTileNoteDurations: nil,
+                secondTileInstruments: nil
             ))
         }
 
@@ -319,10 +418,12 @@ class MidiParser {
                 let merged = NoteEvent(
                     time: current.time,
                     gapToNextNote: newGapToNext,
-                    noteDuration: current.noteDuration,
+                    noteDurations: current.noteDurations,
                     midiNotes: current.midiNotes,
+                    instruments: current.instruments,
                     secondTileMidiNotes: next.midiNotes,
-                    secondTileNoteDuration: next.noteDuration
+                    secondTileNoteDurations: next.noteDurations,
+                    secondTileInstruments: next.instruments
                 )
                 result.append(merged)
 
@@ -336,5 +437,44 @@ class MidiParser {
         }
 
         return result
+    }
+
+    // Helper: Convert GM program number to instrument name for debugging
+    private func gmInstrumentName(_ program: UInt8) -> String {
+        let names = [
+            "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+            "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet",
+            "Celesta", "Glockenspiel", "Music Box", "Vibraphone",
+            "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+            "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ",
+            "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+            "Acoustic Guitar (nylon)", "Acoustic Guitar (steel)", "Electric Guitar (jazz)", "Electric Guitar (clean)",
+            "Electric Guitar (muted)", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics",
+            "Acoustic Bass", "Electric Bass (finger)", "Electric Bass (pick)", "Fretless Bass",
+            "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+            "Violin", "Viola", "Cello", "Contrabass",
+            "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+            "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2",
+            "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit",
+            "Trumpet", "Trombone", "Tuba", "Muted Trumpet",
+            "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2",
+            "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax",
+            "Oboe", "English Horn", "Bassoon", "Clarinet",
+            "Piccolo", "Flute", "Recorder", "Pan Flute",
+            "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+            "Lead 1 (square)", "Lead 2 (sawtooth)", "Lead 3 (calliope)", "Lead 4 (chiff)",
+            "Lead 5 (charang)", "Lead 6 (voice)", "Lead 7 (fifths)", "Lead 8 (bass + lead)",
+            "Pad 1 (new age)", "Pad 2 (warm)", "Pad 3 (polysynth)", "Pad 4 (choir)",
+            "Pad 5 (bowed)", "Pad 6 (metallic)", "Pad 7 (halo)", "Pad 8 (sweep)",
+            "FX 1 (rain)", "FX 2 (soundtrack)", "FX 3 (crystal)", "FX 4 (atmosphere)",
+            "FX 5 (brightness)", "FX 6 (goblins)", "FX 7 (echoes)", "FX 8 (sci-fi)",
+            "Sitar", "Banjo", "Shamisen", "Koto",
+            "Kalimba", "Bagpipe", "Fiddle", "Shanai",
+            "Tinkle Bell", "Agogo", "Steel Drums", "Woodblock",
+            "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal",
+            "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet",
+            "Telephone Ring", "Helicopter", "Applause", "Gunshot"
+        ]
+        return program < names.count ? names[Int(program)] : "Unknown (\(program))"
     }
 }

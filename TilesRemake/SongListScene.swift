@@ -1,4 +1,5 @@
 import SpriteKit
+import UIKit
 
 // MARK: - Song List Scene
 
@@ -8,15 +9,34 @@ class SongListScene: SKScene {
     // MARK: - Properties
 
     private var songs: [SongInfo] = []
+    private var filteredSongs: [(song: SongInfo, difficulty: Int)] = []
     private var playButtons: [(button: SKNode, song: SongInfo)] = []
     private let rowHeight: CGFloat = 80
 
-    // Difficulty thresholds (based on initial speed in pts/sec)
-    private static let difficultyThresholds: [(maxSpeed: CGFloat, level: Int)] = [
-        (400, 1),
-        (700, 2),
-        (1000, 3),
-        (1300, 4)
+    // Scrolling
+    private var scrollContainer: SKNode!
+    private var scrollOffset: CGFloat = 0
+    private var lastTouchY: CGFloat = 0
+    private var lastTouchTime: TimeInterval = 0
+    private var isDragging = false
+    private var scrollVelocity: CGFloat = 0
+    private let decelerationRate: CGFloat = 0.92  // Friction multiplier per frame
+    private let minVelocity: CGFloat = 0.5  // Stop scrolling below this
+    private var contentHeight: CGFloat = 0
+    private var visibleAreaTop: CGFloat = 0
+    private var visibleAreaBottom: CGFloat = 0
+
+    // Search
+    private var searchTextField: UITextField?
+    private var searchQuery: String = ""
+
+    // Difficulty thresholds (based on notes per second - screen independent)
+    private static let difficultyThresholds: [(maxNotesPerSec: CGFloat, level: Int)] = [
+        (2.0, 1),   // Easy: up to 2 notes/sec
+        (3.5, 2),   // Medium: up to 3.5 notes/sec
+        (5.0, 3),   // Hard: up to 5 notes/sec
+        (7.0, 4)    // Very Hard: up to 7 notes/sec
+        // Expert: > 7 notes/sec = level 5
     ]
 
     // Difficulty colors (green to red gradient)
@@ -33,17 +53,39 @@ class SongListScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = .white
         songs = SongManager.shared.availableSongs
+
+        // Calculate difficulties and sort by difficulty (easiest first)
+        let songsWithDifficulty = songs.map { song in
+            (song: song, difficulty: calculateDifficulty(for: song))
+        }
+        filteredSongs = songsWithDifficulty.sorted { $0.difficulty < $1.difficulty }
+
         setupUI()
+        setupSearchBar(in: view)
+    }
+
+    override func willMove(from view: SKView) {
+        searchTextField?.removeFromSuperview()
+        searchTextField = nil
     }
 
     // MARK: - UI Setup
 
     private func setupUI() {
         setupHeader()
-        setupSongList()
+        setupScrollContainer()
+        rebuildSongList()
     }
 
     private func setupHeader() {
+        // Header background (covers scrolling content)
+        let headerHeight: CGFloat = 180
+        let headerBackground = SKSpriteNode(color: .white, size: CGSize(width: size.width, height: headerHeight))
+        headerBackground.anchorPoint = CGPoint(x: 0, y: 1)
+        headerBackground.position = CGPoint(x: 0, y: size.height)
+        headerBackground.zPosition = 100  // Above scroll content
+        addChild(headerBackground)
+
         // Back button
         let backButton = SKLabelNode(text: "< Back")
         backButton.fontName = "Helvetica"
@@ -52,6 +94,7 @@ class SongListScene: SKScene {
         backButton.name = "backButton"
         backButton.horizontalAlignmentMode = .left
         backButton.position = CGPoint(x: 20, y: size.height - 60)
+        backButton.zPosition = 101
         addChild(backButton)
 
         // "Select Song" header (positioned lower)
@@ -60,37 +103,112 @@ class SongListScene: SKScene {
         headerLabel.fontSize = 32
         headerLabel.fontColor = .black
         headerLabel.position = CGPoint(x: size.width / 2, y: size.height - 110)
+        headerLabel.zPosition = 101
         addChild(headerLabel)
     }
 
-    private func setupSongList() {
-        let startY = size.height - 160
+    private func setupSearchBar(in view: SKView) {
+        let searchBarHeight: CGFloat = 40
+        let searchBarY: CGFloat = 125  // Below header
+        let padding: CGFloat = 20
 
-        for (index, song) in songs.enumerated() {
-            let yPos = startY - CGFloat(index) * rowHeight
-            let (songRow, playButton) = createSongRow(song: song, at: yPos)
-            addChild(songRow)
-            playButtons.append((button: playButton, song: song))
+        let textField = UITextField()
+        textField.placeholder = "Search songs..."
+        textField.borderStyle = .roundedRect
+        textField.backgroundColor = UIColor(white: 0.95, alpha: 1.0)
+        textField.font = UIFont.systemFont(ofSize: 16)
+        textField.clearButtonMode = .whileEditing
+        textField.autocorrectionType = .no
+        textField.returnKeyType = .search
+        textField.frame = CGRect(
+            x: padding,
+            y: searchBarY,
+            width: view.bounds.width - padding * 2,
+            height: searchBarHeight
+        )
+        textField.addTarget(self, action: #selector(searchTextChanged(_:)), for: .editingChanged)
+        textField.delegate = self
+
+        view.addSubview(textField)
+        searchTextField = textField
+    }
+
+    @objc private func searchTextChanged(_ textField: UITextField) {
+        searchQuery = textField.text ?? ""
+        filterAndRebuildSongList()
+    }
+
+    private func filterAndRebuildSongList() {
+        // Recalculate filtered songs based on search query
+        let songsWithDifficulty = songs.map { song in
+            (song: song, difficulty: calculateDifficulty(for: song))
+        }
+
+        if searchQuery.isEmpty {
+            filteredSongs = songsWithDifficulty.sorted { $0.difficulty < $1.difficulty }
+        } else {
+            filteredSongs = songsWithDifficulty
+                .filter { $0.song.title.localizedCaseInsensitiveContains(searchQuery) }
+                .sorted { $0.difficulty < $1.difficulty }
+        }
+
+        // Reset scroll and rebuild
+        scrollOffset = 0
+        rebuildSongList()
+    }
+
+    private func setupScrollContainer() {
+        scrollContainer = SKNode()
+        scrollContainer.name = "scrollContainer"
+        addChild(scrollContainer)
+
+        // Define visible area (below search bar)
+        visibleAreaTop = size.height - 180  // Below header and search bar
+        visibleAreaBottom = 20  // Above bottom of screen
+    }
+
+    private func rebuildSongList() {
+        // Clear existing song rows
+        scrollContainer.removeAllChildren()
+        playButtons.removeAll()
+
+        // Calculate content height
+        contentHeight = CGFloat(filteredSongs.count) * rowHeight
+
+        // Create rows in scroll container (positioned from top)
+        for (index, item) in filteredSongs.enumerated() {
+            let yPos = visibleAreaTop - CGFloat(index) * rowHeight - rowHeight / 2
+            let (songRow, playButton) = createSongRow(song: item.song, difficulty: item.difficulty, at: yPos)
+            scrollContainer.addChild(songRow)
+            playButtons.append((button: playButton, song: item.song))
         }
 
         // Show message if no songs found
-        if songs.isEmpty {
-            let noSongsLabel = SKLabelNode(text: "No songs found")
+        scrollContainer.childNode(withName: "noSongsLabel")?.removeFromParent()
+        if filteredSongs.isEmpty {
+            let noSongsLabel = SKLabelNode(text: searchQuery.isEmpty ? "No songs found" : "No matching songs")
             noSongsLabel.fontName = "Helvetica"
             noSongsLabel.fontSize = 24
             noSongsLabel.fontColor = .gray
+            noSongsLabel.name = "noSongsLabel"
             noSongsLabel.position = CGPoint(x: size.width / 2, y: size.height / 2)
             addChild(noSongsLabel)
         }
+
+        // Apply current scroll offset
+        updateScrollPosition()
     }
 
-    private func createSongRow(song: SongInfo, at yPos: CGFloat) -> (container: SKNode, playButton: SKNode) {
+    private func updateScrollPosition() {
+        scrollContainer.position.y = scrollOffset
+    }
+
+    private func createSongRow(song: SongInfo, difficulty: Int, at yPos: CGFloat) -> (container: SKNode, playButton: SKNode) {
         let container = SKNode()
         container.position = CGPoint(x: 0, y: yPos)
         container.name = "songRow_\(song.id)"
 
         let boxHeight = rowHeight - 10
-        let difficulty = calculateDifficulty(for: song)
         let difficultyBoxWidth = boxHeight  // Square difficulty box
         let cornerRadius: CGFloat = 10
         let padding: CGFloat = 20
@@ -162,34 +280,34 @@ class SongListScene: SKScene {
 
     // MARK: - Difficulty Calculation
 
-    /// Calculate difficulty level (1-5) for a song based on its initial speed
+    /// Calculate difficulty level (1-5) for a song based on notes per second (screen independent)
     private func calculateDifficulty(for song: SongInfo) -> Int {
-        let speed = calculateSpeed(for: song)
+        let notesPerSecond = calculateNotesPerSecond(for: song)
 
-        for (maxSpeed, level) in SongListScene.difficultyThresholds {
-            if speed <= maxSpeed {
+        for (maxNotesPerSec, level) in SongListScene.difficultyThresholds {
+            if notesPerSecond <= maxNotesPerSec {
                 return level
             }
         }
-        return 5  // Highest difficulty for speeds > 1300
+        return 5  // Highest difficulty for > 7 notes/sec
     }
 
-    /// Calculate initial speed for a song (same formula as GameScene)
-    private func calculateSpeed(for song: SongInfo) -> CGFloat {
-        // Use custom speed if provided
+    /// Calculate notes per second for a song (screen independent difficulty metric)
+    private func calculateNotesPerSecond(for song: SongInfo) -> CGFloat {
+        // If custom speed is provided, estimate notes/sec from it
+        // Using a reference tile height of 200 pts (typical screen)
         if let customSpeed = song.customSpeed {
-            return customSpeed
+            let referenceTileHeight: CGFloat = 200
+            return customSpeed / referenceTileHeight
         }
 
-        // Parse MIDI to calculate speed from note density
+        // Parse MIDI to calculate actual note density
         let parser = MidiParser()
         guard let beatmap = parser.parse(url: song.url) else {
-            return 500  // Default fallback
+            return 2.5  // Default fallback (medium difficulty)
         }
 
-        let notesPerSecond = CGFloat(beatmap.notes.count) / CGFloat(beatmap.totalDuration)
-        let estimatedTileHeight = size.height / GameConfig.visibleTileCount
-        return estimatedTileHeight * notesPerSecond
+        return CGFloat(beatmap.notes.count) / CGFloat(beatmap.totalDuration)
     }
 
     // MARK: - Touch Handling
@@ -197,6 +315,9 @@ class SongListScene: SKScene {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         let location = touch.location(in: self)
+
+        // Dismiss keyboard when tapping outside search bar
+        searchTextField?.resignFirstResponder()
 
         // Check back button
         if let backButton = childNode(withName: "backButton"),
@@ -216,6 +337,69 @@ class SongListScene: SKScene {
                 }
             }
         }
+
+        // Start scroll tracking
+        lastTouchY = location.y
+        lastTouchTime = CACurrentMediaTime()
+        scrollVelocity = 0  // Stop any existing momentum
+        isDragging = true
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard isDragging, let touch = touches.first else { return }
+        let location = touch.location(in: self)
+        let currentTime = CACurrentMediaTime()
+
+        let deltaY = location.y - lastTouchY
+        let deltaTime = currentTime - lastTouchTime
+
+        // Calculate velocity (points per second)
+        if deltaTime > 0 {
+            scrollVelocity = deltaY / CGFloat(deltaTime)
+        }
+
+        lastTouchY = location.y
+        lastTouchTime = currentTime
+
+        // Update scroll offset
+        scrollOffset += deltaY
+        clampScrollOffset()
+        updateScrollPosition()
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        isDragging = false
+        // Velocity is preserved for momentum scrolling
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        isDragging = false
+        scrollVelocity = 0
+    }
+
+    override func update(_ currentTime: TimeInterval) {
+        // Apply momentum scrolling when not dragging
+        guard !isDragging, abs(scrollVelocity) > minVelocity else { return }
+
+        // Apply velocity (scaled for 60fps frame time)
+        let frameTime: CGFloat = 1.0 / 60.0
+        scrollOffset += scrollVelocity * frameTime
+        clampScrollOffset()
+        updateScrollPosition()
+
+        // Apply deceleration
+        scrollVelocity *= decelerationRate
+    }
+
+    private func clampScrollOffset() {
+        let visibleHeight = visibleAreaTop - visibleAreaBottom
+        let maxScroll = max(0, contentHeight - visibleHeight)
+        scrollOffset = max(0, min(scrollOffset, maxScroll))
+
+        // Stop velocity at bounds
+        if scrollOffset <= 0 || scrollOffset >= maxScroll {
+            scrollVelocity = 0
+        }
     }
 
     // MARK: - Navigation
@@ -232,5 +416,14 @@ class SongListScene: SKScene {
         gameScene.scaleMode = scaleMode
         let transition = SKTransition.push(with: .left, duration: 0.3)
         view?.presentScene(gameScene, transition: transition)
+    }
+}
+
+// MARK: - UITextFieldDelegate
+
+extension SongListScene: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
     }
 }
