@@ -5,4 +5,7 @@
     "fantasie-impromptu": {
         "initialSpeed": 1700
     },
+    "stay-alive": {
+        "initialSpeed": 900
+    },
 }

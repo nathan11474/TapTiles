@@ -24,6 +24,14 @@ class AudioManager {
     private var extraSamplers: [UInt8: AVAudioUnitSampler] = [:]
     private var soundFontURL: URL?
 
+    // Track last note per instrument for overlap prevention on sustained instruments
+    private var lastNotePerInstrument: [UInt8: (note: UInt8, startTime: Date)] = [:]
+
+    // Adaptive timing thresholds for note transitions
+    private let veryFastThreshold: TimeInterval = 0.1    // < 100ms: Allow natural overlap
+    private let consecutiveThreshold: TimeInterval = 0.3  // 100-300ms: Use micro-overlap
+    private let microOverlapDuration: TimeInterval = 0.035 // 35ms overlap for smooth transitions
+
     private init() {
         engine = AVAudioEngine()
         sampler = AVAudioUnitSampler()
@@ -181,16 +189,117 @@ class AudioManager {
         return sampler
     }
 
+    /// Get the release buffer for an instrument based on its type
+    /// Sustained instruments (winds, strings, etc.) need extra time to fade naturally
+    private func releaseBuffer(for instrument: UInt8) -> TimeInterval {
+        switch instrument {
+        case 0...7:     // Pianos - natural decay
+            return 0
+        case 8...15:    // Chromatic Percussion - natural decay
+            return 0
+        case 16...23:   // Organs - sustained
+            return 0.15
+        case 24...31:   // Guitars - plucked, natural decay
+            return 0
+        case 32...39:   // Bass - plucked, natural decay
+            return 0
+        case 40...51:   // Strings - sustained/bowed
+            return 0.2
+        case 52...55:   // Choir/Voice - sustained
+            return 0.2
+        case 56...63:   // Brass - sustained
+            return 0.15
+        case 64...71:   // Reed (Sax, Oboe, Clarinet) - sustained
+            return 0.15
+        case 72...79:   // Pipe (Flute, Recorder) - sustained
+            return 0.15
+        case 80...87:   // Synth Leads - usually sustained
+            return 0.1
+        case 88...95:   // Synth Pads - long attack/release
+            return 0.3
+        case 96...103:  // Synth Effects
+            return 0.1
+        case 104...111: // Ethnic - mixed
+            return 0.1
+        case 112...119: // Percussive - natural decay
+            return 0
+        default:        // Sound Effects and unknown
+            return 0
+        }
+    }
+
+    /// Get the maximum release buffer for a set of instruments
+    func maxReleaseBuffer(for instruments: [UInt8]) -> TimeInterval {
+        return instruments.map { releaseBuffer(for: $0) }.max() ?? 0
+    }
+
+    /// Check if an instrument is sustained (needs overlap prevention)
+    private func isSustainedInstrument(_ instrument: UInt8) -> Bool {
+        return releaseBuffer(for: instrument) > 0
+    }
+
+    /// Adaptive note transition handling for sustained instruments
+    /// - Very fast passages (< 100ms): Allow natural overlap for legato effect
+    /// - Normal passages (100-300ms): Use micro-overlap for smooth transitions
+    /// - Slow passages (> 300ms): No special handling needed
+    private func stopPreviousNoteIfConsecutive(instrument: UInt8) {
+        guard isSustainedInstrument(instrument) else { return }
+        guard let lastNote = lastNotePerInstrument[instrument] else { return }
+
+        let elapsed = Date().timeIntervalSince(lastNote.startTime)
+
+        if elapsed < veryFastThreshold {
+            // Very fast passage: Allow natural overlap
+            // Don't stop the previous note - let its scheduled stop happen naturally
+            // This creates a natural legato sound
+            return
+        } else if elapsed < consecutiveThreshold {
+            // Normal passage: Use micro-overlap for smooth transition
+            // Cancel the previous note's scheduled stop
+            _ = incrementGeneration(for: lastNote.note, instrument: instrument)
+
+            // Schedule stop of previous note after a micro-overlap delay
+            // This creates a brief crossfade effect
+            let previousNote = lastNote.note
+            let targetSampler = getSampler(for: instrument)
+            DispatchQueue.main.asyncAfter(deadline: .now() + microOverlapDuration) {
+                targetSampler.stopNote(previousNote, onChannel: 0)
+            }
+        }
+        // > 300ms: Not consecutive, no special handling needed
+    }
+
+    /// Record that a note started playing on an instrument
+    private func recordNoteStart(note: UInt8, instrument: UInt8) {
+        if isSustainedInstrument(instrument) {
+            lastNotePerInstrument[instrument] = (note: note, startTime: Date())
+        }
+    }
+
     func playSustainedNote(_ note: UInt8, velocity: UInt8 = 127, instrument: UInt8 = 0) {
+        // For sustained instruments, stop any recent note to prevent overlap
+        stopPreviousNoteIfConsecutive(instrument: instrument)
+
         _ = incrementGeneration(for: note, instrument: instrument)
         getSampler(for: instrument).startNote(note, withVelocity: velocity, onChannel: 0)
+
+        // Record this note for overlap prevention
+        recordNoteStart(note: note, instrument: instrument)
     }
 
     func playShortNote(_ note: UInt8, velocity: UInt8 = 100, duration: TimeInterval = 0.5, instrument: UInt8 = 0) {
+        // For sustained instruments, stop any recent note to prevent overlap
+        stopPreviousNoteIfConsecutive(instrument: instrument)
+
         let generation = incrementGeneration(for: note, instrument: instrument)
         let targetSampler = getSampler(for: instrument)
+        let totalDuration = duration + releaseBuffer(for: instrument)
         targetSampler.startNote(note, withVelocity: velocity, onChannel: 0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+
+        // Record this note for overlap prevention
+        recordNoteStart(note: note, instrument: instrument)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + totalDuration) { [weak self] in
             guard let self = self, self.getGeneration(for: note, instrument: instrument) == generation else { return }
             targetSampler.stopNote(note, onChannel: 0)
         }
@@ -252,9 +361,11 @@ class AudioManager {
         }
     }
 
-    func stopNotesAfterDelay(_ notes: [UInt8], delay: TimeInterval) {
-        for note in notes {
-            stopNoteAfterDelay(note, delay: delay)
+    func stopNotesAfterDelay(_ notes: [UInt8], delay: TimeInterval, instruments: [UInt8] = [0]) {
+        for (index, note) in notes.enumerated() {
+            let instrument = index < instruments.count ? instruments[index] : (instruments.last ?? 0)
+            let totalDelay = delay + releaseBuffer(for: instrument)
+            stopNoteAfterDelay(note, delay: totalDelay)
         }
     }
 

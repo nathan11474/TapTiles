@@ -469,12 +469,13 @@ class GameScene: SKScene {
         // Use the tracked notes (handles double-long-tile pairs correctly)
         let notesToStop = tile.currentlyPlayingNotes ?? tile.midiNotes
         let durations = tile.currentlyPlayingDurations ?? tile.noteDurations
+        let instruments = tile.currentlyPlayingInstruments ?? tile.instruments
         let maxDuration = durations.max() ?? 0.5
 
         // If tile was at least half completed, let the notes decay naturally
         // If released too early (< 50%), stop immediately
         if tile.isHalfOrMoreCompleted() {
-            AudioManager.shared.stopNotesAfterDelay(notesToStop, delay: maxDuration)
+            AudioManager.shared.stopNotesAfterDelay(notesToStop, delay: maxDuration, instruments: instruments)
         } else {
             AudioManager.shared.stopNotes(notesToStop)
         }
