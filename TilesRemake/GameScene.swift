@@ -471,9 +471,9 @@ class GameScene: SKScene {
         let durations = tile.currentlyPlayingDurations ?? tile.noteDurations
         let maxDuration = durations.max() ?? 0.5
 
-        // If tile was fully completed, let the notes decay naturally
-        // If released early, stop immediately
-        if tile.isFullyCompleted() {
+        // If tile was at least half completed, let the notes decay naturally
+        // If released too early (< 50%), stop immediately
+        if tile.isHalfOrMoreCompleted() {
             AudioManager.shared.stopNotesAfterDelay(notesToStop, delay: maxDuration)
         } else {
             AudioManager.shared.stopNotes(notesToStop)

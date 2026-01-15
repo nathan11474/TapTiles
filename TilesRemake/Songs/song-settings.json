@@ -1,5 +1,8 @@
 {
-    "rush-e": {
-        "initialSpeed": 1200,
-    }
+    "the-flight-of-the-bumble-bee": {
+        "initialSpeed": 1700
+    },
+    "fantasie-impromptu": {
+        "initialSpeed": 1700
+    },
 }

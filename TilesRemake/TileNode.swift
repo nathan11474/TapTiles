@@ -213,6 +213,11 @@ class TileNode: SKSpriteNode {
         return completedSegments >= tileLength
     }
 
+    // Check if at least half the segments are completed (for sustain threshold)
+    func isHalfOrMoreCompleted() -> Bool {
+        return completedSegments >= (tileLength + 1) / 2  // Rounds up: 3 segments = need 2, 4 segments = need 2
+    }
+
     // Make the entire tile transparent (for when it becomes a ghost tile)
     func makeTransparent() {
         if isLongTile {
