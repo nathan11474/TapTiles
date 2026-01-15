@@ -177,13 +177,14 @@ class GameScene: SKScene {
         // Get note durations for audio decay (individual per note in chord)
         let noteDurations = firstNote?.noteDurations ?? [0.5]
         let instruments = firstNote?.instruments ?? [0]
+        let gapToNextNote = firstNote?.gapToNextNote ?? 0.5
 
         // Play tile represents the current note, so advance to the next one
         if beatmap != nil {
             currentNoteIndex += 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: midiNotes, noteDurations: noteDurations, instruments: instruments)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: midiNotes, noteDurations: noteDurations, instruments: instruments, gapToNextNote: gapToNextNote)
 
         // Position at the bottom of the screen (so bottom edge touches screen bottom)
         // For long tiles, the center is higher due to larger size
@@ -215,7 +216,8 @@ class GameScene: SKScene {
     private func startGame() {
         // Handle the play tile like a normal tile tap (for non-long tiles)
         if let tile = playTile {
-            AudioManager.shared.playShortNotes(tile.midiNotes, durations: tile.noteDurations, instruments: tile.instruments)
+            let adjustedDurations = adjustDurations(tile.noteDurations, tile: tile)
+            AudioManager.shared.playShortNotes(tile.midiNotes, durations: adjustedDurations, instruments: tile.instruments)
             tile.makeTransparent()
             tappedTiles.append(tile)
             score += 1
@@ -433,6 +435,83 @@ class GameScene: SKScene {
         return false
     }
 
+    // MARK: - Duration Adjustment for Visual Timing
+
+    // Threshold for considering MIDI gap as "intentional silence" vs continuous notes
+    private let silenceGapThreshold: TimeInterval = 0.1  // 100ms
+
+    /// Find the next tile that will be tapped (the one above this tile, excluding siblings)
+    private func findNextTile(after tile: TileNode) -> TileNode? {
+        // Sort active tiles by Y position (higher Y = will be tapped later)
+        let sortedTiles = activeTiles.sorted { $0.position.y < $1.position.y }
+
+        // Find current tile's index
+        guard let currentIndex = sortedTiles.firstIndex(where: { $0 === tile }) else {
+            return nil
+        }
+
+        // Find the next tile (higher Y) that isn't this tile's sibling
+        for i in (currentIndex + 1)..<sortedTiles.count {
+            let candidate = sortedTiles[i]
+            // Skip sibling tiles (they're tapped together, not sequentially)
+            if candidate === tile.siblingTile {
+                continue
+            }
+            return candidate
+        }
+
+        return nil  // No next tile found (user is tapping the topmost tile)
+    }
+
+    /// Calculate visual gap time to next tile based on scroll speed
+    private func visualGapTime(from tile: TileNode, to nextTile: TileNode) -> TimeInterval {
+        // Distance from current tile center to next tile center
+        let distance = nextTile.position.y - tile.position.y
+        // Time = distance / speed
+        return TimeInterval(distance / currentSpeed)
+    }
+
+    /// Adjust durations based on visual timing
+    /// Only extends if: MIDI duration < visual gap AND MIDI gap is small (continuous notes)
+    private func adjustDurations(_ durations: [TimeInterval], tile: TileNode) -> [TimeInterval] {
+        // Find next tile
+        guard let nextTile = findNextTile(after: tile) else {
+            // No next tile - use original durations
+            print("DurationAdjust: No next tile found, using original durations: \(durations.map { String(format: "%.3f", $0) })")
+            return durations
+        }
+
+        let visualGap = visualGapTime(from: tile, to: nextTile)
+        let midiGap = tile.gapToNextNote
+
+        // Only adjust if MIDI gap is small (indicating continuous notes, not intentional silence)
+        guard midiGap < silenceGapThreshold else {
+            print("DurationAdjust: MIDI gap \(String(format: "%.3f", midiGap))s > threshold, intentional silence - no adjustment")
+            return durations
+        }
+
+        // Adjust each duration: extend to visual gap if shorter, but cap at 90% of visual gap
+        // to leave a tiny space before the next tile
+        let targetDuration = visualGap * 0.9
+
+        let adjustedDurations = durations.map { duration in
+            if duration < targetDuration {
+                return targetDuration
+            }
+            return duration  // Already longer than visual gap, leave it
+        }
+
+        // Log if any adjustments were made
+        let wasAdjusted = zip(durations, adjustedDurations).contains { $0 != $1 }
+        if wasAdjusted {
+            print("DurationAdjust: EXTENDED - midiGap=\(String(format: "%.3f", midiGap))s, visualGap=\(String(format: "%.3f", visualGap))s, speed=\(String(format: "%.0f", currentSpeed)) | \(durations.map { String(format: "%.3f", $0) }) → \(adjustedDurations.map { String(format: "%.3f", $0) })")
+        } else {
+            print("DurationAdjust: No change needed - midiGap=\(String(format: "%.3f", midiGap))s, visualGap=\(String(format: "%.3f", visualGap))s, durations already >= target")
+        }
+
+        return adjustedDurations
+    }
+
     private func handleTileTap(_ tile: TileNode) {
         // For double tile pairs: first tap plays first note, second tap plays second note
         // This ensures musical order is preserved regardless of which physical tile is tapped first
@@ -444,14 +523,17 @@ class GameScene: SKScene {
 
             if siblingStillActive {
                 // First tap of the pair - play the first notes with their instruments
-                AudioManager.shared.playShortNotes(pairNotes[0], durations: pairDurations[0], instruments: pairInstruments[0])
+                let adjustedDurations = adjustDurations(pairDurations[0], tile: tile)
+                AudioManager.shared.playShortNotes(pairNotes[0], durations: adjustedDurations, instruments: pairInstruments[0])
             } else {
                 // Second tap of the pair - play the second notes with their instruments
-                AudioManager.shared.playShortNotes(pairNotes[1], durations: pairDurations[1], instruments: pairInstruments[1])
+                let adjustedDurations = adjustDurations(pairDurations[1], tile: tile)
+                AudioManager.shared.playShortNotes(pairNotes[1], durations: adjustedDurations, instruments: pairInstruments[1])
             }
         } else {
             // Normal tile - play its assigned notes with their instruments
-            AudioManager.shared.playShortNotes(tile.midiNotes, durations: tile.noteDurations, instruments: tile.instruments)
+            let adjustedDurations = adjustDurations(tile.noteDurations, tile: tile)
+            AudioManager.shared.playShortNotes(tile.midiNotes, durations: adjustedDurations, instruments: tile.instruments)
         }
 
         // Make tile transparent
@@ -708,7 +790,8 @@ class GameScene: SKScene {
                 tileLength: tileLength,
                 midiNotes: note.midiNotes,
                 noteDurations: note.noteDurations,
-                instruments: note.instruments
+                instruments: note.instruments,
+                gapToNextNote: note.gapToNextNote
             )
             firstTile.pairNotes = pairNotes
             firstTile.pairDurations = pairDurations
@@ -723,7 +806,8 @@ class GameScene: SKScene {
                 tileLength: tileLength,
                 midiNotes: secondNotes,
                 noteDurations: note.secondTileNoteDurations ?? [0.5],
-                instruments: note.secondTileInstruments ?? note.instruments
+                instruments: note.secondTileInstruments ?? note.instruments,
+                gapToNextNote: note.gapToNextNote
             )
             secondTile.pairNotes = pairNotes
             secondTile.pairDurations = pairDurations
@@ -761,7 +845,7 @@ class GameScene: SKScene {
             tileLength = 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: note.midiNotes, noteDurations: note.noteDurations, instruments: note.instruments)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: note.midiNotes, noteDurations: note.noteDurations, instruments: note.instruments, gapToNextNote: note.gapToNextNote)
 
         // Position tile - for long tiles, the center is higher due to larger size
         let tileCenterY = yPosition + (CGFloat(tileLength - 1) * tileSize.height) / 2

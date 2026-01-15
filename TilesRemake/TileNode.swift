@@ -12,6 +12,7 @@ class TileNode: SKSpriteNode {
     var midiNotes: [UInt8] = [60]  // MIDI notes to play (multiple = chord)
     var noteDurations: [TimeInterval] = [0.5]  // Individual durations per note (parallel array with midiNotes)
     var instruments: [UInt8] = [0]  // General MIDI instruments (parallel array with midiNotes)
+    var gapToNextNote: TimeInterval = 0.5  // MIDI gap to next note (used for duration adjustment)
 
     // Double tile pairing - tiles share a note queue, first tap plays first note regardless of which tile
     weak var siblingTile: TileNode?
@@ -90,13 +91,14 @@ class TileNode: SKSpriteNode {
         return tileBottom + unitHeight
     }
 
-    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], instruments: [UInt8] = [0]) {
+    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], instruments: [UInt8] = [0], gapToNextNote: TimeInterval = 0.5) {
         self.column = column
         self.tileLength = tileLength
         self.unitHeight = size.height
         self.midiNotes = midiNotes
         self.noteDurations = noteDurations
         self.instruments = instruments
+        self.gapToNextNote = gapToNextNote
 
         // Calculate actual size based on tile length
         let actualHeight = size.height * CGFloat(tileLength)
