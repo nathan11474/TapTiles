@@ -476,8 +476,6 @@ class GameScene: SKScene {
     private func adjustDurations(_ durations: [TimeInterval], tile: TileNode) -> [TimeInterval] {
         // Find next tile
         guard let nextTile = findNextTile(after: tile) else {
-            // No next tile - use original durations
-            print("DurationAdjust: No next tile found, using original durations: \(durations.map { String(format: "%.3f", $0) })")
             return durations
         }
 
@@ -486,7 +484,6 @@ class GameScene: SKScene {
 
         // Only adjust if MIDI gap is small (indicating continuous notes, not intentional silence)
         guard midiGap < silenceGapThreshold else {
-            print("DurationAdjust: MIDI gap \(String(format: "%.3f", midiGap))s > threshold, intentional silence - no adjustment")
             return durations
         }
 
@@ -494,22 +491,12 @@ class GameScene: SKScene {
         // to leave a tiny space before the next tile
         let targetDuration = visualGap * 0.9
 
-        let adjustedDurations = durations.map { duration in
+        return durations.map { duration in
             if duration < targetDuration {
                 return targetDuration
             }
-            return duration  // Already longer than visual gap, leave it
+            return duration
         }
-
-        // Log if any adjustments were made
-        let wasAdjusted = zip(durations, adjustedDurations).contains { $0 != $1 }
-        if wasAdjusted {
-            print("DurationAdjust: EXTENDED - midiGap=\(String(format: "%.3f", midiGap))s, visualGap=\(String(format: "%.3f", visualGap))s, speed=\(String(format: "%.0f", currentSpeed)) | \(durations.map { String(format: "%.3f", $0) }) → \(adjustedDurations.map { String(format: "%.3f", $0) })")
-        } else {
-            print("DurationAdjust: No change needed - midiGap=\(String(format: "%.3f", midiGap))s, visualGap=\(String(format: "%.3f", visualGap))s, durations already >= target")
-        }
-
-        return adjustedDurations
     }
 
     private func handleTileTap(_ tile: TileNode) {
