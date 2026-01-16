@@ -446,18 +446,20 @@ class GameScene: SKScene {
         let sortedTiles = activeTiles.sorted { $0.position.y < $1.position.y }
 
         // Find current tile's index
-        guard let currentIndex = sortedTiles.firstIndex(where: { $0 === tile }) else {
-            return nil
-        }
-
-        // Find the next tile (higher Y) that isn't this tile's sibling
-        for i in (currentIndex + 1)..<sortedTiles.count {
-            let candidate = sortedTiles[i]
-            // Skip sibling tiles (they're tapped together, not sequentially)
-            if candidate === tile.siblingTile {
-                continue
+        if let currentIndex = sortedTiles.firstIndex(where: { $0 === tile }) {
+            // Current tile is in activeTiles - find the next one
+            for i in (currentIndex + 1)..<sortedTiles.count {
+                let candidate = sortedTiles[i]
+                // Skip sibling tiles (they're tapped together, not sequentially)
+                if candidate === tile.siblingTile {
+                    continue
+                }
+                return candidate
             }
-            return candidate
+        } else {
+            // Current tile not in activeTiles (e.g., Play tile)
+            // Return the first active tile (lowest Y = next to be tapped)
+            return sortedTiles.first
         }
 
         return nil  // No next tile found (user is tapping the topmost tile)
@@ -476,6 +478,7 @@ class GameScene: SKScene {
     private func adjustDurations(_ durations: [TimeInterval], tile: TileNode) -> [TimeInterval] {
         // Find next tile
         guard let nextTile = findNextTile(after: tile) else {
+            print("DurationAdjust: No next tile found, using original durations: \(durations.map { String(format: "%.3f", $0) })")
             return durations
         }
 
@@ -484,6 +487,7 @@ class GameScene: SKScene {
 
         // Only adjust if MIDI gap is small (indicating continuous notes, not intentional silence)
         guard midiGap < silenceGapThreshold else {
+            print("DurationAdjust: MIDI gap \(String(format: "%.3f", midiGap))s > threshold, intentional silence - no adjustment")
             return durations
         }
 
@@ -491,12 +495,22 @@ class GameScene: SKScene {
         // to leave a tiny space before the next tile
         let targetDuration = visualGap * 0.9
 
-        return durations.map { duration in
+        let adjustedDurations = durations.map { duration in
             if duration < targetDuration {
                 return targetDuration
             }
             return duration
         }
+
+        // Log if any adjustments were made
+        let wasAdjusted = zip(durations, adjustedDurations).contains { $0 != $1 }
+        if wasAdjusted {
+            print("DurationAdjust: EXTENDED - midiGap=\(String(format: "%.3f", midiGap))s, visualGap=\(String(format: "%.3f", visualGap))s, speed=\(String(format: "%.0f", currentSpeed)), nextIsLong=\(nextTile.isLongTile) | \(durations.map { String(format: "%.3f", $0) }) → \(adjustedDurations.map { String(format: "%.3f", $0) })")
+        } else {
+            print("DurationAdjust: No change needed - midiGap=\(String(format: "%.3f", midiGap))s, visualGap=\(String(format: "%.3f", visualGap))s, durations already >= target")
+        }
+
+        return adjustedDurations
     }
 
     private func handleTileTap(_ tile: TileNode) {
