@@ -176,7 +176,6 @@ class GameScene: SKScene {
 
         // Get note durations for audio decay (individual per note in chord)
         let noteDurations = firstNote?.noteDurations ?? [0.5]
-        let velocities = firstNote?.velocities ?? [100]
         let instruments = firstNote?.instruments ?? [0]
         let gapToNextNote = firstNote?.gapToNextNote ?? 0.5
 
@@ -185,7 +184,7 @@ class GameScene: SKScene {
             currentNoteIndex += 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: midiNotes, noteDurations: noteDurations, velocities: velocities, instruments: instruments, gapToNextNote: gapToNextNote)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: midiNotes, noteDurations: noteDurations, instruments: instruments, gapToNextNote: gapToNextNote)
 
         // Position at the bottom of the screen (so bottom edge touches screen bottom)
         // For long tiles, the center is higher due to larger size
@@ -222,7 +221,7 @@ class GameScene: SKScene {
             tile.childNode(withName: "playLabel")?.removeFromParent()
 
             let adjustedDurations = adjustDurations(tile.noteDurations, tile: tile)
-            AudioManager.shared.playShortNotes(tile.midiNotes, velocities: tile.velocities, durations: adjustedDurations, instruments: tile.instruments)
+            AudioManager.shared.playShortNotes(tile.midiNotes, durations: adjustedDurations, instruments: tile.instruments)
             tile.makeTransparent()
             tappedTiles.append(tile)
             score += 1
@@ -254,12 +253,11 @@ class GameScene: SKScene {
         tile.holdingTouch = touch
         tile.currentlyPlayingNotes = tile.midiNotes
         tile.currentlyPlayingDurations = tile.noteDurations
-        tile.currentlyPlayingVelocities = tile.velocities
         tile.currentlyPlayingInstruments = tile.instruments
         heldLongTiles.append(tile)
 
         // Play the sustained notes (lasts until tile is released)
-        AudioManager.shared.playSustainedNotes(tile.midiNotes, velocities: tile.velocities, instruments: tile.instruments)
+        AudioManager.shared.playSustainedNotes(tile.midiNotes, instruments: tile.instruments)
 
         // Complete the first segment (points awarded on completion)
         tile.completeFirstSegment()
@@ -342,7 +340,7 @@ class GameScene: SKScene {
             heldLongTiles.append(longTile)
 
             // For double-long-tile pairs: first tap plays first note, second tap plays second note
-            if longTile.isDoubleTilePair, let pairNotes = longTile.pairNotes, let pairDurations = longTile.pairDurations, let pairVelocities = longTile.pairVelocities, let pairInstruments = longTile.pairInstruments {
+            if longTile.isDoubleTilePair, let pairNotes = longTile.pairNotes, let pairDurations = longTile.pairDurations, let pairInstruments = longTile.pairInstruments {
                 // Check if sibling is NOT yet being held (i.e., we're the first to be tapped)
                 // For long tiles, we check heldLongTiles rather than activeTiles because
                 // long tiles stay in activeTiles while being held
@@ -351,27 +349,24 @@ class GameScene: SKScene {
                 } ?? true
 
                 if siblingNotYetHeld {
-                    // First tap - play first notes with their velocities and instruments
+                    // First tap - play first notes with their instruments
                     longTile.currentlyPlayingNotes = pairNotes[0]
                     longTile.currentlyPlayingDurations = pairDurations[0]
-                    longTile.currentlyPlayingVelocities = pairVelocities[0]
                     longTile.currentlyPlayingInstruments = pairInstruments[0]
-                    AudioManager.shared.playSustainedNotes(pairNotes[0], velocities: pairVelocities[0], instruments: pairInstruments[0])
+                    AudioManager.shared.playSustainedNotes(pairNotes[0], instruments: pairInstruments[0])
                 } else {
-                    // Second tap - play second notes with their velocities and instruments
+                    // Second tap - play second notes with their instruments
                     longTile.currentlyPlayingNotes = pairNotes[1]
                     longTile.currentlyPlayingDurations = pairDurations[1]
-                    longTile.currentlyPlayingVelocities = pairVelocities[1]
                     longTile.currentlyPlayingInstruments = pairInstruments[1]
-                    AudioManager.shared.playSustainedNotes(pairNotes[1], velocities: pairVelocities[1], instruments: pairInstruments[1])
+                    AudioManager.shared.playSustainedNotes(pairNotes[1], instruments: pairInstruments[1])
                 }
             } else {
-                // Normal long tile - play its notes with their velocities and instruments
+                // Normal long tile - play its notes with their instruments
                 longTile.currentlyPlayingNotes = longTile.midiNotes
                 longTile.currentlyPlayingDurations = longTile.noteDurations
-                longTile.currentlyPlayingVelocities = longTile.velocities
                 longTile.currentlyPlayingInstruments = longTile.instruments
-                AudioManager.shared.playSustainedNotes(longTile.midiNotes, velocities: longTile.velocities, instruments: longTile.instruments)
+                AudioManager.shared.playSustainedNotes(longTile.midiNotes, instruments: longTile.instruments)
             }
 
             // Immediately complete the first segment (points awarded on completion)
@@ -526,25 +521,25 @@ class GameScene: SKScene {
     private func handleTileTap(_ tile: TileNode) {
         // For double tile pairs: first tap plays first note, second tap plays second note
         // This ensures musical order is preserved regardless of which physical tile is tapped first
-        if tile.isDoubleTilePair, let pairNotes = tile.pairNotes, let pairDurations = tile.pairDurations, let pairVelocities = tile.pairVelocities, let pairInstruments = tile.pairInstruments {
+        if tile.isDoubleTilePair, let pairNotes = tile.pairNotes, let pairDurations = tile.pairDurations, let pairInstruments = tile.pairInstruments {
             // Check if sibling is still in activeTiles
             let siblingStillActive = tile.siblingTile.map { sibling in
                 activeTiles.contains(where: { $0 === sibling })
             } ?? false
 
             if siblingStillActive {
-                // First tap of the pair - play the first notes with their velocities and instruments
+                // First tap of the pair - play the first notes with their instruments
                 let adjustedDurations = adjustDurations(pairDurations[0], tile: tile)
-                AudioManager.shared.playShortNotes(pairNotes[0], velocities: pairVelocities[0], durations: adjustedDurations, instruments: pairInstruments[0])
+                AudioManager.shared.playShortNotes(pairNotes[0], durations: adjustedDurations, instruments: pairInstruments[0])
             } else {
-                // Second tap of the pair - play the second notes with their velocities and instruments
+                // Second tap of the pair - play the second notes with their instruments
                 let adjustedDurations = adjustDurations(pairDurations[1], tile: tile)
-                AudioManager.shared.playShortNotes(pairNotes[1], velocities: pairVelocities[1], durations: adjustedDurations, instruments: pairInstruments[1])
+                AudioManager.shared.playShortNotes(pairNotes[1], durations: adjustedDurations, instruments: pairInstruments[1])
             }
         } else {
-            // Normal tile - play its assigned notes with their velocities and instruments
+            // Normal tile - play its assigned notes with their instruments
             let adjustedDurations = adjustDurations(tile.noteDurations, tile: tile)
-            AudioManager.shared.playShortNotes(tile.midiNotes, velocities: tile.velocities, durations: adjustedDurations, instruments: tile.instruments)
+            AudioManager.shared.playShortNotes(tile.midiNotes, durations: adjustedDurations, instruments: tile.instruments)
         }
 
         // Make tile transparent
@@ -827,7 +822,6 @@ class GameScene: SKScene {
             // Store both notes in musical order - first tap plays first notes, second tap plays second notes
             let pairNotes: [[UInt8]] = [note.midiNotes, secondNotes]
             let pairDurations: [[TimeInterval]] = [note.noteDurations, note.secondTileNoteDurations ?? [0.5]]
-            let pairVelocities: [[UInt8]] = [note.velocities, note.secondTileVelocities ?? note.velocities]
             let pairInstruments: [[UInt8]] = [note.instruments, note.secondTileInstruments ?? note.instruments]
 
             // Position for long tiles - center is higher due to larger size
@@ -839,13 +833,11 @@ class GameScene: SKScene {
                 tileLength: tileLength,
                 midiNotes: note.midiNotes,
                 noteDurations: note.noteDurations,
-                velocities: note.velocities,
                 instruments: note.instruments,
                 gapToNextNote: note.gapToNextNote
             )
             firstTile.pairNotes = pairNotes
             firstTile.pairDurations = pairDurations
-            firstTile.pairVelocities = pairVelocities
             firstTile.pairInstruments = pairInstruments
             firstTile.position = CGPoint(x: columnPositions[columns[0]], y: tileCenterY)
             addChild(firstTile)
@@ -857,13 +849,11 @@ class GameScene: SKScene {
                 tileLength: tileLength,
                 midiNotes: secondNotes,
                 noteDurations: note.secondTileNoteDurations ?? [0.5],
-                velocities: note.secondTileVelocities ?? note.velocities,
                 instruments: note.secondTileInstruments ?? note.instruments,
                 gapToNextNote: note.gapToNextNote
             )
             secondTile.pairNotes = pairNotes
             secondTile.pairDurations = pairDurations
-            secondTile.pairVelocities = pairVelocities
             secondTile.pairInstruments = pairInstruments
             secondTile.position = CGPoint(x: columnPositions[columns[1]], y: tileCenterY)
             addChild(secondTile)
@@ -898,7 +888,7 @@ class GameScene: SKScene {
             tileLength = 1
         }
 
-        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: note.midiNotes, noteDurations: note.noteDurations, velocities: note.velocities, instruments: note.instruments, gapToNextNote: note.gapToNextNote)
+        let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: note.midiNotes, noteDurations: note.noteDurations, instruments: note.instruments, gapToNextNote: note.gapToNextNote)
 
         // Position tile - for long tiles, the center is higher due to larger size
         let tileCenterY = yPosition + (CGFloat(tileLength - 1) * tileSize.height) / 2
