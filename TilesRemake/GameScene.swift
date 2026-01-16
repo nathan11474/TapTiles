@@ -576,10 +576,39 @@ class GameScene: SKScene {
         // Award points: full points if completed, 1 point if released early
         if tile.isFullyCompleted() {
             score += tile.tileLength
+            showPointsAnimation(points: tile.tileLength, on: tile)
         } else {
             score += 1
         }
         updateScoreDisplay()
+    }
+
+    // MARK: - Point Animation
+
+    private func showPointsAnimation(points: Int, on tile: TileNode) {
+        let label = SKLabelNode(text: "+\(points)")
+        label.fontName = "Helvetica-Bold"
+        label.fontSize = 28
+        label.fontColor = TileNode.longTileColor
+        // Position above the tile (relative to tile's center)
+        label.position = CGPoint(x: 0, y: tile.size.height / 2 + 20)
+        label.zPosition = 150
+        label.alpha = 0
+
+        tile.addChild(label)
+
+        // Animation: fade in (to 75% opacity), move up, fade out
+        let fadeIn = SKAction.fadeAlpha(to: 0.75, duration: 0.1)
+        let moveUp = SKAction.moveBy(x: 0, y: 60, duration: 0.5)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.2)
+        let remove = SKAction.removeFromParent()
+
+        let moveAndFade = SKAction.group([moveUp, SKAction.sequence([
+            SKAction.wait(forDuration: 0.3),
+            fadeOut
+        ])])
+
+        label.run(SKAction.sequence([fadeIn, moveAndFade, remove]))
     }
 
     // MARK: - Game Over
