@@ -57,6 +57,7 @@ class TileNode: SKSpriteNode {
 
     // Long tile colors
     static let longTileColor = UIColor(red: 0.3, green: 0.1, blue: 0.4, alpha: 1.0)  // Dark purple
+    static let longTileFillColor = UIColor(red: 0.6, green: 0.5, blue: 0.9, alpha: 1.0)  // Light purple
     static let completedSegmentColor = UIColor.lightGray.withAlphaComponent(0.3)
 
     // Long tile state
@@ -64,9 +65,14 @@ class TileNode: SKSpriteNode {
     var isBeingHeld: Bool = false
     var fingerY: CGFloat = 0  // Track where the user's finger is (in scene coordinates)
     var completedSegments: Int = 0  // How many segments have been completed
+    var fillHeight: CGFloat = 0  // Current height of the fill (in points)
 
-    // Segment sprites for long tiles (bottom to top)
+    // Segment sprites for long tiles (bottom to top) - kept for compatibility
     private var segments: [SKSpriteNode] = []
+
+    // Fill node for long tile hold animation
+    private var fillNode: SKShapeNode?
+    private var fillCropNode: SKCropNode?
 
     // Expanded frame for hit detection
     var hitboxFrame: CGRect {
@@ -133,32 +139,142 @@ class TileNode: SKSpriteNode {
         }
     }
 
+    // Long tile decoration colors (matching the fill color)
+    static let decorationColor = UIColor(red: 0.5, green: 0.4, blue: 0.8, alpha: 0.25)  // Slightly muted purple for decoration
+    static let decorationCircleRadius: CGFloat = 10
+    static let decorationLineWidth: CGFloat = 2
+
     private func setupLongTileSegments(size: CGSize, tileLength: Int) {
-        // Hide the base sprite color - we'll use segment sprites instead
-        self.color = .clear
+        // Use the base sprite as the dark purple background
+        self.color = TileNode.longTileColor
 
+        // Add a border around the entire tile (will be covered by fill when held)
+        let border = SKShapeNode(rectOf: self.size)
+        border.strokeColor = .darkGray
+        border.lineWidth = 2
+        border.fillColor = .clear
+        border.zPosition = 2
+        addChild(border)
+
+        // Add circle and line decoration
+        addLongTileDecoration()
+
+        // Create the fill shape (starts empty, will grow from bottom)
+        // Use a crop node to clip the fill to the tile bounds
+        let cropNode = SKCropNode()
+        cropNode.zPosition = 5  // Above border so fill covers it
+
+        // Mask is slightly larger than tile so fill covers the border
+        let maskSize = CGSize(width: self.size.width + 4, height: self.size.height + 4)
+        let maskNode = SKSpriteNode(color: .white, size: maskSize)
+        cropNode.maskNode = maskNode
+
+        // Create the fill shape - starts with zero height
+        updateFillShape(height: 0, in: cropNode)
+
+        addChild(cropNode)
+        fillCropNode = cropNode
+
+        // Create placeholder segments for compatibility with existing logic
         let segmentSize = CGSize(width: size.width, height: size.height)
-
         for i in 0..<tileLength {
-            // Create segment sprite
-            let segment = SKSpriteNode(color: TileNode.longTileColor, size: segmentSize)
-
-            // Position from bottom to top
-            // Bottom segment is at -height/2 + segmentHeight/2
+            let segment = SKSpriteNode(color: .clear, size: segmentSize)
             let yOffset = -self.size.height / 2 + segmentSize.height / 2 + CGFloat(i) * segmentSize.height
             segment.position = CGPoint(x: 0, y: yOffset)
-            segment.zPosition = 1
-
-            // Add border to each segment
-            let border = SKShapeNode(rectOf: segmentSize)
-            border.strokeColor = .darkGray
-            border.lineWidth = 1
-            border.fillColor = .clear
-            segment.addChild(border)
-
-            addChild(segment)
+            segment.zPosition = 0
             segments.append(segment)
+            // Don't add to scene - these are just for tracking
         }
+    }
+
+    private func addLongTileDecoration() {
+        let radius = TileNode.decorationCircleRadius
+        let lineWidth = TileNode.decorationLineWidth
+
+        // Position the circle near the bottom of the tile
+        let circleY = -self.size.height / 2 + radius + 60  // 60pt from bottom
+        let lineTopY = self.size.height / 2 - 40  // 40pt from top
+
+        // Create outer ring (darker stroke)
+        let outerRing = SKShapeNode(circleOfRadius: radius)
+        outerRing.position = CGPoint(x: 0, y: circleY)
+        outerRing.strokeColor = TileNode.decorationColor
+        outerRing.lineWidth = 3
+        outerRing.fillColor = .clear
+        outerRing.zPosition = 1
+        addChild(outerRing)
+
+        // Create inner circle (filled)
+        let innerCircle = SKShapeNode(circleOfRadius: radius - 5)
+        innerCircle.position = CGPoint(x: 0, y: circleY)
+        innerCircle.fillColor = TileNode.decorationColor.withAlphaComponent(0.6)
+        innerCircle.strokeColor = .clear
+        innerCircle.zPosition = 1
+        addChild(innerCircle)
+
+        // Create the vertical line from circle to top
+        let linePath = CGMutablePath()
+        linePath.move(to: CGPoint(x: 0, y: circleY + radius))
+        linePath.addLine(to: CGPoint(x: 0, y: lineTopY))
+
+        let line = SKShapeNode(path: linePath)
+        line.strokeColor = TileNode.decorationColor
+        line.lineWidth = lineWidth
+        line.zPosition = 1
+        addChild(line)
+    }
+
+    // Height of the oval curve at the top of the fill
+    private static let ovalHeight: CGFloat = 25
+
+    // How much higher the fill spawns above the finger position (also affects completion timing)
+    // Increase this value to make fill spawn higher and complete earlier
+    static let fillSpawnOffset: CGFloat = 75
+
+    private func updateFillShape(height: CGFloat, in cropNode: SKCropNode) {
+        // Remove old fill node
+        fillNode?.removeFromParent()
+
+        guard height > 0 else {
+            fillNode = nil
+            return
+        }
+
+        let tileWidth = self.size.width
+        let tileHeight = self.size.height
+        let ovalHeight = TileNode.ovalHeight
+
+        let path = CGMutablePath()
+
+        // Start at bottom-left (use slightly larger width to ensure edge coverage)
+        let bottomY = -tileHeight / 2 - 1  // Extend slightly below
+        let leftX = -tileWidth / 2 - 1     // Extend slightly left
+        let rightX = tileWidth / 2 + 1     // Extend slightly right
+        let topY = bottomY + height + 1    // +1 to match bottom extension
+
+        // Bottom edge (straight)
+        path.move(to: CGPoint(x: leftX, y: bottomY))
+        path.addLine(to: CGPoint(x: rightX, y: bottomY))
+
+        // Right edge up to where curve starts
+        path.addLine(to: CGPoint(x: rightX, y: topY - ovalHeight))
+
+        // Oval top using quadratic curve (more elliptical than arc)
+        // The crop mask will clip anything outside the tile bounds
+        path.addQuadCurve(to: CGPoint(x: leftX, y: topY - ovalHeight),
+                         control: CGPoint(x: 0, y: topY))
+
+        // Left edge back down
+        path.addLine(to: CGPoint(x: leftX, y: bottomY))
+        path.closeSubpath()
+
+        let newFillNode = SKShapeNode(path: path)
+        newFillNode.fillColor = TileNode.longTileFillColor
+        newFillNode.strokeColor = .clear
+        newFillNode.zPosition = 1
+
+        cropNode.addChild(newFillNode)
+        fillNode = newFillNode
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -173,11 +289,23 @@ class TileNode: SKSpriteNode {
 
     // Complete the first segment immediately when tapped
     func completeFirstSegment() {
-        guard isLongTile, completedSegments == 0, !segments.isEmpty else { return }
+        guard isLongTile, completedSegments == 0 else { return }
 
-        let segment = segments[0]
-        segment.color = TileNode.completedSegmentColor
-        segment.children.forEach { $0.removeFromParent() }
+        // Calculate initial fill height based on where the finger tapped
+        // Tile bottom in scene coordinates
+        let tileBottom = position.y - size.height / 2
+
+        // Fill height is from tile bottom to finger position
+        // Add oval height so the rounded top appears at the finger position
+        // Add spawn offset to make fill spawn higher and complete earlier
+        let initialFillHeight = fingerY - tileBottom + TileNode.ovalHeight + TileNode.fillSpawnOffset
+
+        // Clamp to a small minimum (so something is visible), no max clamp
+        fillHeight = max(10, initialFillHeight)
+
+        if let cropNode = fillCropNode {
+            updateFillShape(height: fillHeight, in: cropNode)
+        }
         completedSegments = 1
     }
 
@@ -187,27 +315,41 @@ class TileNode: SKSpriteNode {
         guard isLongTile, isBeingHeld else { return 0 }
 
         self.fingerY = fingerY
-        var newlyCompleted = 0
 
-        // Check each uncompleted segment
-        for i in completedSegments..<tileLength {
-            let segment = segments[i]
+        // Calculate how much of the tile has scrolled past the finger
+        // Tile bottom in scene coordinates
+        let tileBottom = position.y - size.height / 2
 
-            // Get the segment's position in scene coordinates
-            let segmentSceneY = position.y + segment.position.y
-            let segmentBottom = segmentSceneY - unitHeight / 2
+        // How far the finger is from the tile bottom (this is how much should be filled)
+        // Add oval height so the rounded top appears at the finger position
+        // Add spawn offset to make fill spawn higher and complete earlier
+        let targetFillHeight = fingerY - tileBottom + TileNode.ovalHeight + TileNode.fillSpawnOffset
 
-            // If the segment's bottom has scrolled past (below) the finger, it's completed
-            if segmentBottom < fingerY {
-                // Complete this segment
-                segment.color = TileNode.completedSegmentColor
-                segment.children.forEach { $0.removeFromParent() }  // Remove border
-                completedSegments += 1
-                newlyCompleted += 1
+        // Don't clamp - let fill height exceed tile height so curve scrolls past naturally
+        // The crop mask will handle visual clipping
+        let newFillHeight = max(0, targetFillHeight)
+
+        // Update fill if it has grown
+        if newFillHeight > fillHeight {
+            fillHeight = newFillHeight
+            if let cropNode = fillCropNode {
+                updateFillShape(height: fillHeight, in: cropNode)
             }
         }
 
-        return newlyCompleted
+        // Calculate completed segments based on fill height
+        let previousCompleted = completedSegments
+
+        // Tile is complete when the BOTTOM of the curve (straight part) reaches the top
+        // This happens when fillHeight >= size.height + ovalHeight
+        if fillHeight >= size.height + TileNode.ovalHeight - 1 {
+            completedSegments = tileLength
+        } else {
+            completedSegments = max(1, Int(floor(fillHeight / unitHeight)))  // At least 1 since we tapped
+            completedSegments = min(completedSegments, tileLength)  // Cap at tile length
+        }
+
+        return completedSegments - previousCompleted
     }
 
     // Check if all segments are completed
@@ -223,13 +365,43 @@ class TileNode: SKSpriteNode {
     // Make the entire tile transparent (for when it becomes a ghost tile)
     func makeTransparent() {
         if isLongTile {
-            for segment in segments {
-                segment.color = TileNode.completedSegmentColor
-                segment.children.forEach { $0.removeFromParent() }
-            }
+            // Make the background transparent
+            self.color = TileNode.completedSegmentColor
+            // Remove fill and border
+            fillNode?.removeFromParent()
+            fillNode = nil
+            fillCropNode?.removeFromParent()
+            fillCropNode = nil
+            // Remove any remaining children (like border)
+            self.children.forEach { $0.removeFromParent() }
         } else {
             self.color = TileNode.completedSegmentColor
             self.children.forEach { $0.removeFromParent() }
         }
+    }
+
+    // Animate the tile fading to completed color (for fully completed long tiles)
+    func animateFillFadeOut(duration: TimeInterval = 0.1) {
+        guard isLongTile else { return }
+
+        // Set background to light gray (matching completed normal tiles)
+        self.color = .lightGray
+
+        // Remove the fill block and crop node
+        fillNode?.removeFromParent()
+        fillNode = nil
+        fillCropNode?.removeFromParent()
+        fillCropNode = nil
+
+        // Hide the border and decorations
+        for child in children {
+            if let shapeNode = child as? SKShapeNode {
+                shapeNode.alpha = 0
+            }
+        }
+
+        // Fade to match completedSegmentColor (0.3 alpha)
+        let fadeToSemiTransparent = SKAction.fadeAlpha(to: 0.3, duration: duration)
+        self.run(fadeToSemiTransparent)
     }
 }

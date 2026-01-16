@@ -561,8 +561,12 @@ class GameScene: SKScene {
             AudioManager.shared.stopNotes(notesToStop)
         }
 
-        // Tile is already transparent from segment completion
-        tile.makeTransparent()
+        // Handle visual completion based on whether tile was fully completed
+        if tile.isFullyCompleted() {
+            // Fully completed: animate fill fading out smoothly
+            tile.animateFillFadeOut()
+        }
+        // Prematurely released: leave fill where it is (no visual change)
 
         // Move from active to tapped tiles
         activeTiles.removeAll { $0 === tile }
