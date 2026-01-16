@@ -195,6 +195,7 @@ class GameScene: SKScene {
 
         // Add "Play" label to the first (bottom) segment
         let playLabel = SKLabelNode(text: "Play")
+        playLabel.name = "playLabel"
         playLabel.fontName = "Helvetica-Bold"
         playLabel.fontSize = 36
         playLabel.fontColor = .white
@@ -216,6 +217,9 @@ class GameScene: SKScene {
     private func startGame() {
         // Handle the play tile like a normal tile tap (for non-long tiles)
         if let tile = playTile {
+            // Remove the "Play" label
+            tile.childNode(withName: "playLabel")?.removeFromParent()
+
             let adjustedDurations = adjustDurations(tile.noteDurations, tile: tile)
             AudioManager.shared.playShortNotes(tile.midiNotes, durations: adjustedDurations, instruments: tile.instruments)
             tile.makeTransparent()
@@ -231,6 +235,9 @@ class GameScene: SKScene {
     }
 
     private func startGameWithLongPlayTile(_ tile: TileNode, touchLocation: CGPoint, touch: UITouch) {
+        // Remove the "Play" label
+        tile.childNode(withName: "playLabel")?.removeFromParent()
+
         // Start the game
         gameState = .playing
         songStartTime = 0  // Will be set on first update
@@ -732,8 +739,7 @@ class GameScene: SKScene {
 
         let songListScene = SongListScene(size: size)
         songListScene.scaleMode = scaleMode
-        let transition = SKTransition.push(with: .right, duration: 0.3)
-        view?.presentScene(songListScene, transition: transition)
+        view?.presentScene(songListScene)
     }
 
     // MARK: - Tile Spawning

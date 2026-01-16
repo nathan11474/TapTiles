@@ -229,7 +229,7 @@ class TileNode: SKSpriteNode {
 
     // How much higher the fill spawns above the finger position (also affects completion timing)
     // Increase this value to make fill spawn higher and complete earlier
-    static let fillSpawnOffset: CGFloat = 75
+    static let fillSpawnOffset: CGFloat = 100
 
     private func updateFillShape(height: CGFloat, in cropNode: SKCropNode) {
         // Remove old fill node

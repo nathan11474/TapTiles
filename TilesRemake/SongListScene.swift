@@ -30,6 +30,10 @@ class SongListScene: SKScene {
     private var searchTextField: UITextField?
     private var searchQuery: String = ""
 
+    // Async difficulty loading
+    private var loadingLabel: SKLabelNode?
+    private var pendingDifficultyCalculations: Set<String> = []
+
     // Difficulty thresholds (based on notes per second - screen independent)
     private static let difficultyThresholds: [(maxNotesPerSec: CGFloat, level: Int)] = [
         (2.0, 1),   // Easy: up to 2 notes/sec
@@ -54,14 +58,26 @@ class SongListScene: SKScene {
         backgroundColor = .white
         songs = SongManager.shared.availableSongs
 
-        // Calculate difficulties and sort by difficulty (easiest first)
-        let songsWithDifficulty = songs.map { song in
-            (song: song, difficulty: calculateDifficulty(for: song))
+        // Check which songs need difficulty calculation
+        var songsNeedingCalculation: [SongInfo] = []
+        for song in songs {
+            if SongManager.shared.getCachedDifficulty(for: song.id) == nil {
+                songsNeedingCalculation.append(song)
+            }
         }
-        filteredSongs = songsWithDifficulty.sorted { $0.difficulty < $1.difficulty }
 
-        setupUI()
+        setupHeader()
+        setupScrollContainer()
         setupSearchBar(in: view)
+
+        if songsNeedingCalculation.isEmpty {
+            // All difficulties cached - show list immediately
+            buildSortedSongList()
+        } else {
+            // Show loading message and calculate in background
+            showLoadingMessage()
+            calculateDifficultiesAsync(for: songsNeedingCalculation)
+        }
     }
 
     override func willMove(from view: SKView) {
@@ -70,12 +86,6 @@ class SongListScene: SKScene {
     }
 
     // MARK: - UI Setup
-
-    private func setupUI() {
-        setupHeader()
-        setupScrollContainer()
-        rebuildSongList()
-    }
 
     private func setupHeader() {
         // Header background (covers scrolling content)
@@ -139,17 +149,26 @@ class SongListScene: SKScene {
     }
 
     private func filterAndRebuildSongList() {
-        // Recalculate filtered songs based on search query
-        let songsWithDifficulty = songs.map { song in
-            (song: song, difficulty: calculateDifficulty(for: song))
+        // Use cached difficulties
+        let songsWithDifficulty = songs.map { song -> (song: SongInfo, difficulty: Int) in
+            let difficulty = SongManager.shared.getCachedDifficulty(for: song.id) ?? 3
+            return (song: song, difficulty: difficulty)
         }
 
+        // Filter by search query
+        let filtered: [(song: SongInfo, difficulty: Int)]
         if searchQuery.isEmpty {
-            filteredSongs = songsWithDifficulty.sorted { $0.difficulty < $1.difficulty }
+            filtered = songsWithDifficulty
         } else {
-            filteredSongs = songsWithDifficulty
-                .filter { $0.song.title.localizedCaseInsensitiveContains(searchQuery) }
-                .sorted { $0.difficulty < $1.difficulty }
+            filtered = songsWithDifficulty.filter { $0.song.title.localizedCaseInsensitiveContains(searchQuery) }
+        }
+
+        // Sort by difficulty, then by name
+        filteredSongs = filtered.sorted { lhs, rhs in
+            if lhs.difficulty != rhs.difficulty {
+                return lhs.difficulty < rhs.difficulty
+            }
+            return lhs.song.title < rhs.song.title
         }
 
         // Reset scroll and rebuild
@@ -165,6 +184,37 @@ class SongListScene: SKScene {
         // Define visible area (below search bar)
         visibleAreaTop = size.height - 180  // Below header and search bar
         visibleAreaBottom = 20  // Above bottom of screen
+    }
+
+    private func showLoadingMessage() {
+        let label = SKLabelNode(text: "Loading songs...")
+        label.fontName = "Helvetica"
+        label.fontSize = 24
+        label.fontColor = .gray
+        label.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        label.name = "loadingLabel"
+        addChild(label)
+        loadingLabel = label
+    }
+
+    private func hideLoadingMessage() {
+        loadingLabel?.removeFromParent()
+        loadingLabel = nil
+    }
+
+    private func buildSortedSongList() {
+        // Build sorted list from cached difficulties
+        filteredSongs = songs.map { song -> (song: SongInfo, difficulty: Int) in
+            let difficulty = SongManager.shared.getCachedDifficulty(for: song.id) ?? 3  // Fallback to medium
+            return (song: song, difficulty: difficulty)
+        }.sorted { lhs, rhs in
+            if lhs.difficulty != rhs.difficulty {
+                return lhs.difficulty < rhs.difficulty
+            }
+            return lhs.song.title < rhs.song.title
+        }
+
+        rebuildSongList()
     }
 
     private func rebuildSongList() {
@@ -310,6 +360,37 @@ class SongListScene: SKScene {
         return CGFloat(beatmap.notes.count) / CGFloat(beatmap.totalDuration)
     }
 
+    // MARK: - Async Difficulty Loading
+
+    /// Calculate difficulties asynchronously for songs without cached values
+    private func calculateDifficultiesAsync(for songs: [SongInfo]) {
+        pendingDifficultyCalculations = Set(songs.map { $0.id })
+
+        for song in songs {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+
+                // Calculate difficulty (this is the expensive MIDI parsing)
+                let difficulty = self.calculateDifficulty(for: song)
+
+                // Cache the result
+                SongManager.shared.cacheDifficulty(difficulty, for: song.id)
+
+                // Update UI on main thread
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.pendingDifficultyCalculations.remove(song.id)
+
+                    // When all calculations are complete, show the sorted list
+                    if self.pendingDifficultyCalculations.isEmpty {
+                        self.hideLoadingMessage()
+                        self.buildSortedSongList()
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Touch Handling
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -405,17 +486,21 @@ class SongListScene: SKScene {
     // MARK: - Navigation
 
     private func transitionToHome() {
+        searchTextField?.removeFromSuperview()
+        searchTextField = nil
+
         let homeScene = HomeScene(size: size)
         homeScene.scaleMode = scaleMode
-        let transition = SKTransition.push(with: .right, duration: 0.3)
-        view?.presentScene(homeScene, transition: transition)
+        view?.presentScene(homeScene)
     }
 
     private func startGame(with song: SongInfo) {
+        searchTextField?.removeFromSuperview()
+        searchTextField = nil
+
         let gameScene = GameScene(size: size, songURL: song.url, customSpeed: song.customSpeed, startFromNote: song.startFromNote)
         gameScene.scaleMode = scaleMode
-        let transition = SKTransition.push(with: .left, duration: 0.3)
-        view?.presentScene(gameScene, transition: transition)
+        view?.presentScene(gameScene)
     }
 }
 

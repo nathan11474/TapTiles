@@ -67,7 +67,6 @@ class HomeScene: SKScene {
     private func transitionToSongList() {
         let songListScene = SongListScene(size: size)
         songListScene.scaleMode = scaleMode
-        let transition = SKTransition.push(with: .left, duration: 0.3)
-        view?.presentScene(songListScene, transition: transition)
+        view?.presentScene(songListScene)
     }
 }

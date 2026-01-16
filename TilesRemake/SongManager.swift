@@ -10,9 +10,29 @@ class SongManager {
     private(set) var availableSongs: [SongInfo] = []
     private var songSettings: SongSettingsFile = [:]
 
+    // Cache for calculated difficulties (persists for app lifetime)
+    private var cachedDifficulties: [String: Int] = [:]
+    private let cacheQueue = DispatchQueue(label: "com.tilesremake.difficultycache")
+
     private init() {
         loadSongSettings()
         loadAvailableSongs()
+    }
+
+    // MARK: - Difficulty Cache
+
+    /// Get cached difficulty for a song, or nil if not yet calculated
+    func getCachedDifficulty(for songId: String) -> Int? {
+        return cacheQueue.sync {
+            cachedDifficulties[songId]
+        }
+    }
+
+    /// Cache a calculated difficulty for a song
+    func cacheDifficulty(_ difficulty: Int, for songId: String) {
+        cacheQueue.sync {
+            cachedDifficulties[songId] = difficulty
+        }
     }
 
     /// Reload songs from bundle (useful if songs are added dynamically)
