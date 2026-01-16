@@ -11,13 +11,11 @@ struct NoteEvent {
     let gapToNextNote: TimeInterval  // Time until NEXT note (used for tile length calculation)
     let noteDurations: [TimeInterval] // Individual note durations from MIDI (parallel array with midiNotes)
     let midiNotes: [UInt8]           // MIDI note numbers 0-127 (multiple = chord)
-    let velocities: [UInt8]          // MIDI velocities 0-127 (parallel array with midiNotes)
     let instruments: [UInt8]         // MIDI program numbers 0-127 (parallel array with midiNotes)
 
     // For double-tile rows (fast sections): second tile's notes
     let secondTileMidiNotes: [UInt8]?
     let secondTileNoteDurations: [TimeInterval]?
-    let secondTileVelocities: [UInt8]?
     let secondTileInstruments: [UInt8]?
 
     /// Convenience for single note
