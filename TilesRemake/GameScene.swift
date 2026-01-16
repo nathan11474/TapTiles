@@ -252,9 +252,8 @@ class GameScene: SKScene {
         // Play the sustained notes (lasts until tile is released)
         AudioManager.shared.playSustainedNotes(tile.midiNotes, instruments: tile.instruments)
 
-        // Complete the first segment and award 1 point
+        // Complete the first segment (points awarded on completion)
         tile.completeFirstSegment()
-        score += 1
         updateScoreDisplay()
     }
 
@@ -363,9 +362,8 @@ class GameScene: SKScene {
                 AudioManager.shared.playSustainedNotes(longTile.midiNotes, instruments: longTile.instruments)
             }
 
-            // Immediately complete the first segment (like tapping a normal tile)
+            // Immediately complete the first segment (points awarded on completion)
             longTile.completeFirstSegment()
-            score += 1
             updateScoreDisplay()
         } else if let tile = findTile(at: location) {
             if tile.isLongTile {
@@ -575,7 +573,12 @@ class GameScene: SKScene {
         tile.holdingTouch = nil
         heldLongTiles.removeAll { $0 === tile }
 
-        // Points already awarded per segment, no additional points needed
+        // Award points: full points if completed, 1 point if released early
+        if tile.isFullyCompleted() {
+            score += tile.tileLength
+        } else {
+            score += 1
+        }
         updateScoreDisplay()
     }
 
@@ -893,13 +896,7 @@ class GameScene: SKScene {
         // Update all held long tiles - check for segment completion
         for heldTile in heldLongTiles {
             // Update segments based on finger position (stored on tile)
-            let completedCount = heldTile.updateSegmentsForHold(fingerY: heldTile.fingerY)
-
-            // Award points for each newly completed segment
-            if completedCount > 0 {
-                score += completedCount
-                updateScoreDisplay()
-            }
+            _ = heldTile.updateSegmentsForHold(fingerY: heldTile.fingerY)
 
             // Check if all segments are complete
             if heldTile.isFullyCompleted() {
