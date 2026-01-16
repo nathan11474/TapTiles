@@ -11,11 +11,13 @@ struct NoteEvent {
     let gapToNextNote: TimeInterval  // Time until NEXT note (used for tile length calculation)
     let noteDurations: [TimeInterval] // Individual note durations from MIDI (parallel array with midiNotes)
     let midiNotes: [UInt8]           // MIDI note numbers 0-127 (multiple = chord)
+    let velocities: [UInt8]          // MIDI velocities 0-127 (parallel array with midiNotes)
     let instruments: [UInt8]         // MIDI program numbers 0-127 (parallel array with midiNotes)
 
     // For double-tile rows (fast sections): second tile's notes
     let secondTileMidiNotes: [UInt8]?
     let secondTileNoteDurations: [TimeInterval]?
+    let secondTileVelocities: [UInt8]?
     let secondTileInstruments: [UInt8]?
 
     /// Convenience for single note
@@ -28,6 +30,11 @@ struct NoteEvent {
         return instruments.first ?? 0
     }
 
+    /// Convenience for single velocity
+    var velocity: UInt8 {
+        return velocities.first ?? 100
+    }
+
     /// Convenience for single duration (max of all durations for backwards compatibility)
     var noteDuration: TimeInterval {
         return noteDurations.max() ?? 0.5
@@ -36,6 +43,11 @@ struct NoteEvent {
     /// Convenience for second tile's duration (max)
     var secondTileNoteDuration: TimeInterval? {
         return secondTileNoteDurations?.max()
+    }
+
+    /// Convenience for second tile's velocity (single)
+    var secondTileVelocity: UInt8? {
+        return secondTileVelocities?.first
     }
 
     /// Whether this is a chord (multiple simultaneous notes)
@@ -93,7 +105,7 @@ class MidiParser {
         print("MidiParser: Found \(trackCount) tracks")
 
         // Collect all notes from all tracks
-        var allNotes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] = []
+        var allNotes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, velocity: UInt8, instrument: UInt8)] = []
 
         for i in 0..<trackCount {
             var track: MusicTrack?
@@ -212,9 +224,9 @@ class MidiParser {
         return 120.0  // Default tempo if none found
     }
 
-    // Parse a single track, extracting note events with their durations and instruments
-    private func parseTrack(_ track: MusicTrack, tempo: Double) -> [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] {
-        var notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] = []
+    // Parse a single track, extracting note events with their durations, velocities, and instruments
+    private func parseTrack(_ track: MusicTrack, tempo: Double) -> [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, velocity: UInt8, instrument: UInt8)] {
+        var notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, velocity: UInt8, instrument: UInt8)] = []
 
         // First pass: collect program changes (instrument assignments) by channel
         // Key: (channel, timeInBeats), Value: program number
@@ -288,6 +300,7 @@ class MidiParser {
                 if let data = eventData {
                     let noteMessage = data.assumingMemoryBound(to: MIDINoteMessage.self)
                     let midiNote = noteMessage.pointee.note
+                    let velocity = noteMessage.pointee.velocity
                     let channel = noteMessage.pointee.channel
                     let durationInBeats = Double(noteMessage.pointee.duration)
 
@@ -303,7 +316,7 @@ class MidiParser {
                     let timeInSeconds = (timestamp / tempo) * 60.0
                     let durationInSeconds = (durationInBeats / tempo) * 60.0
 
-                    notes.append((time: timeInSeconds, noteDuration: durationInSeconds, midiNote: midiNote, instrument: instrument))
+                    notes.append((time: timeInSeconds, noteDuration: durationInSeconds, midiNote: midiNote, velocity: velocity, instrument: instrument))
                 }
             }
 
@@ -317,20 +330,21 @@ class MidiParser {
 
     // Group notes into chords and calculate gaps
     // Notes within chordTolerance seconds of each other are considered simultaneous (a chord)
-    private func calculateDurations(notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)], songEnd: TimeInterval) -> [NoteEvent] {
+    private func calculateDurations(notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, velocity: UInt8, instrument: UInt8)], songEnd: TimeInterval) -> [NoteEvent] {
         guard !notes.isEmpty else { return [] }
 
         // Tolerance for considering notes as simultaneous (in seconds)
         let chordTolerance: TimeInterval = 0.02
 
         // Group notes into chords based on timing
-        // Stores individual durations per note (parallel arrays)
-        var chordGroups: [(time: TimeInterval, durations: [TimeInterval], midiNotes: [UInt8], instruments: [UInt8])] = []
+        // Stores individual durations, velocities per note (parallel arrays)
+        var chordGroups: [(time: TimeInterval, durations: [TimeInterval], midiNotes: [UInt8], velocities: [UInt8], instruments: [UInt8])] = []
 
-        var currentGroup: (time: TimeInterval, durations: [TimeInterval], midiNotes: [UInt8], instruments: [UInt8]) = (
+        var currentGroup: (time: TimeInterval, durations: [TimeInterval], midiNotes: [UInt8], velocities: [UInt8], instruments: [UInt8]) = (
             time: notes[0].time,
             durations: [notes[0].noteDuration],
             midiNotes: [notes[0].midiNote],
+            velocities: [notes[0].velocity],
             instruments: [notes[0].instrument]
         )
 
@@ -339,9 +353,10 @@ class MidiParser {
 
             // Check if this note is within tolerance of the current group's time
             if abs(note.time - currentGroup.time) <= chordTolerance {
-                // Same chord - add note with its individual duration and instrument
+                // Same chord - add note with its individual duration, velocity, and instrument
                 currentGroup.midiNotes.append(note.midiNote)
                 currentGroup.durations.append(note.noteDuration)
+                currentGroup.velocities.append(note.velocity)
                 currentGroup.instruments.append(note.instrument)
             } else {
                 // New chord - save current group and start new one
@@ -350,6 +365,7 @@ class MidiParser {
                     time: note.time,
                     durations: [note.noteDuration],
                     midiNotes: [note.midiNote],
+                    velocities: [note.velocity],
                     instruments: [note.instrument]
                 )
             }
@@ -377,9 +393,11 @@ class MidiParser {
                 gapToNextNote: gapToNext,
                 noteDurations: group.durations,
                 midiNotes: group.midiNotes,
+                velocities: group.velocities,
                 instruments: group.instruments,
                 secondTileMidiNotes: nil,
                 secondTileNoteDurations: nil,
+                secondTileVelocities: nil,
                 secondTileInstruments: nil
             ))
         }
@@ -420,9 +438,11 @@ class MidiParser {
                     gapToNextNote: newGapToNext,
                     noteDurations: current.noteDurations,
                     midiNotes: current.midiNotes,
+                    velocities: current.velocities,
                     instruments: current.instruments,
                     secondTileMidiNotes: next.midiNotes,
                     secondTileNoteDurations: next.noteDurations,
+                    secondTileVelocities: next.velocities,
                     secondTileInstruments: next.instruments
                 )
                 result.append(merged)

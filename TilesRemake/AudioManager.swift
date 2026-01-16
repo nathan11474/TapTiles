@@ -347,8 +347,25 @@ class AudioManager {
         }
     }
 
+    func playSustainedNotes(_ notes: [UInt8], velocities: [UInt8], instruments: [UInt8] = [0]) {
+        for (index, note) in notes.enumerated() {
+            let velocity = index < velocities.count ? velocities[index] : (velocities.last ?? 127)
+            let instrument = index < instruments.count ? instruments[index] : (instruments.last ?? 0)
+            playSustainedNote(note, velocity: velocity, instrument: instrument)
+        }
+    }
+
     func playShortNotes(_ notes: [UInt8], velocity: UInt8 = 100, durations: [TimeInterval] = [0.5], instruments: [UInt8] = [0]) {
         for (index, note) in notes.enumerated() {
+            let instrument = index < instruments.count ? instruments[index] : (instruments.last ?? 0)
+            let duration = index < durations.count ? durations[index] : (durations.last ?? 0.5)
+            playShortNote(note, velocity: velocity, duration: duration, instrument: instrument)
+        }
+    }
+
+    func playShortNotes(_ notes: [UInt8], velocities: [UInt8], durations: [TimeInterval] = [0.5], instruments: [UInt8] = [0]) {
+        for (index, note) in notes.enumerated() {
+            let velocity = index < velocities.count ? velocities[index] : (velocities.last ?? 100)
             let instrument = index < instruments.count ? instruments[index] : (instruments.last ?? 0)
             let duration = index < durations.count ? durations[index] : (durations.last ?? 0.5)
             playShortNote(note, velocity: velocity, duration: duration, instrument: instrument)
