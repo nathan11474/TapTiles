@@ -66,6 +66,31 @@ class GameScene: SKScene {
     private var longTileThreshold: TimeInterval = 0.5  // Gaps longer than this become long tiles
     private var segmentDuration: TimeInterval = 0.4    // Duration per long tile segment
 
+    // MARK: - Progression System
+
+    private enum ProgressionTier {
+        case stars      // First playthrough: earn 1-3 stars
+        case crowns     // Second playthrough: earn 1-3 crowns
+        case endless    // After 3 crowns: no more levels
+    }
+
+    private var progressionTier: ProgressionTier = .stars
+    private var currentStars: Int = 0           // 0-3 stars earned
+    private var currentCrowns: Int = 0          // 0-3 crowns earned
+    private var loopCount: Int = 0              // How many times song has fully looped
+    private var notesPlayedInCurrentLoop: Int = 0  // Notes played in current loop iteration
+    private var totalNotesInSong: Int = 0       // Cached note count for easy access
+
+    // Gap period after 3 stars (pause before crowns phase)
+    private var isInGapPeriod: Bool = false
+    private var gapStartTime: TimeInterval = 0
+    private let gapDuration: TimeInterval = 3.0  // 3 second gap for animation (must be longer than level-up animation ~2.75s)
+
+    // UI elements for progression display
+    private var progressionContainer: SKNode?
+    private var starNodes: [SKNode] = []
+    private var crownNodes: [SKNode] = []
+
     // MARK: - Scene Lifecycle
 
     override func didMove(to view: SKView) {
@@ -81,6 +106,7 @@ class GameScene: SKScene {
         let parser = MidiParser()
         if let loadedBeatmap = parser.parse(url: songURL) {
             beatmap = loadedBeatmap
+            totalNotesInSong = loadedBeatmap.notes.count
 
             // Calculate relative thresholds based on song's average gap
             longTileThreshold = loadedBeatmap.averageGap * GameConfig.longTileGapMultiplier
@@ -225,12 +251,14 @@ class GameScene: SKScene {
             tile.makeTransparent()
             tappedTiles.append(tile)
             score += 1
+            onNoteCompleted()  // Play tile counts as first note
         }
         playTile = nil
 
         gameState = .playing
         songStartTime = 0  // Will be set on first update
         setupScoreLabel()
+        setupProgressionUI()
         updateScoreDisplay()
     }
 
@@ -242,6 +270,7 @@ class GameScene: SKScene {
         gameState = .playing
         songStartTime = 0  // Will be set on first update
         setupScoreLabel()
+        setupProgressionUI()
 
         // Add Play tile to active tiles so it's tracked during gameplay
         activeTiles.append(tile)
@@ -271,7 +300,7 @@ class GameScene: SKScene {
         label.fontName = "Helvetica-Bold"
         label.fontSize = 32
         label.fontColor = .red
-        label.position = CGPoint(x: size.width / 2, y: size.height - 80)
+        label.position = CGPoint(x: size.width / 2, y: size.height - 120)
         label.zPosition = 100
         addChild(label)
         scoreLabel = label
@@ -279,6 +308,274 @@ class GameScene: SKScene {
 
     private func updateScoreDisplay() {
         scoreLabel?.text = "\(score)"
+    }
+
+    // MARK: - Progression UI
+
+    // Spacing and positioning for progression icons
+    private let progressionSpacing: CGFloat = 55
+    private var progressionStartX: CGFloat { -progressionSpacing }  // Center 3 icons
+
+    private func setupProgressionUI() {
+        // Create container for progression icons (invisible by default)
+        let container = SKNode()
+        container.position = CGPoint(x: size.width / 2, y: size.height - 70)
+        container.zPosition = 150  // Above score label (which is at 100)
+        addChild(container)
+        progressionContainer = container
+
+        // Create 3 star slots (each has outline + filled, both invisible)
+        starNodes.removeAll()
+
+        for i in 0..<3 {
+            let starNode = createStarSlot()
+            starNode.position = CGPoint(x: progressionStartX + CGFloat(i) * progressionSpacing, y: 0)
+            starNode.name = "star_\(i)"
+            container.addChild(starNode)
+            starNodes.append(starNode)
+        }
+    }
+
+    /// Helper to render a colored SF Symbol
+    private func renderColoredSymbol(symbolName: String, color: UIColor, size: CGSize) -> UIImage? {
+        let config = UIImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+        guard let symbolImage = UIImage(systemName: symbolName, withConfiguration: config) else {
+            return nil
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            color.setFill()
+
+            // Calculate scaling to fit symbol within square bounds while maintaining aspect ratio
+            let symbolSize = symbolImage.size
+            let scale = min(size.width / symbolSize.width, size.height / symbolSize.height)
+            let scaledWidth = symbolSize.width * scale
+            let scaledHeight = symbolSize.height * scale
+
+            // Center the symbol within the square
+            let x = (size.width - scaledWidth) / 2
+            let y = (size.height - scaledHeight) / 2
+            let drawRect = CGRect(x: x, y: y, width: scaledWidth, height: scaledHeight)
+
+            symbolImage.draw(in: drawRect, blendMode: .normal, alpha: 1.0)
+            context.fill(CGRect(origin: .zero, size: size), blendMode: .sourceIn)
+        }
+    }
+
+    /// Creates a star slot with both outline (greyed) and filled versions
+    private func createStarSlot() -> SKNode {
+        let container = SKNode()
+
+        // Golden color for stars
+        let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+        let iconSize = CGSize(width: 30, height: 30)
+
+        // Outline star (greyed) - shown as placeholder
+        if let outlineImage = renderColoredSymbol(symbolName: "star", color: .lightGray, size: iconSize) {
+            let outlineTexture = SKTexture(image: outlineImage)
+            let outline = SKSpriteNode(texture: outlineTexture)
+            outline.size = iconSize
+            outline.name = "outline"
+            outline.alpha = 0  // Start invisible
+            container.addChild(outline)
+        }
+
+        // Filled star (golden) - shown when earned
+        if let filledImage = renderColoredSymbol(symbolName: "star.fill", color: goldenColor, size: iconSize) {
+            let filledTexture = SKTexture(image: filledImage)
+            let filled = SKSpriteNode(texture: filledTexture)
+            filled.size = iconSize
+            filled.name = "filled"
+            filled.alpha = 0  // Start invisible
+            container.addChild(filled)
+        }
+
+        return container
+    }
+
+    /// Creates a crown slot with both greyed and filled versions
+    private func createCrownSlot() -> SKNode {
+        let container = SKNode()
+
+        // Golden color for crowns
+        let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+        let iconSize = CGSize(width: 30, height: 30)
+
+        // Greyed crown - shown as placeholder (using outline version)
+        if let outlineImage = renderColoredSymbol(symbolName: "crown", color: .lightGray, size: iconSize) {
+            let outlineTexture = SKTexture(image: outlineImage)
+            let outline = SKSpriteNode(texture: outlineTexture)
+            outline.size = iconSize
+            outline.name = "outline"
+            outline.alpha = 0  // Start invisible
+            container.addChild(outline)
+        }
+
+        // Filled crown (golden) - shown when earned
+        if let filledImage = renderColoredSymbol(symbolName: "crown.fill", color: goldenColor, size: iconSize) {
+            let filledTexture = SKTexture(image: filledImage)
+            let filled = SKSpriteNode(texture: filledTexture)
+            filled.size = iconSize
+            filled.name = "filled"
+            filled.alpha = 0  // Start invisible
+            container.addChild(filled)
+        }
+
+        return container
+    }
+
+    /// Creates a flying star for the animation
+    private func createFlyingStar() -> SKSpriteNode {
+        // Golden color
+        let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+        let iconSize = CGSize(width: 30, height: 30)
+
+        if let starImage = renderColoredSymbol(symbolName: "star.fill", color: goldenColor, size: iconSize) {
+            let starTexture = SKTexture(image: starImage)
+            let star = SKSpriteNode(texture: starTexture)
+            star.size = iconSize
+            return star
+        }
+        // Fallback if SF Symbol isn't available
+        return SKSpriteNode()
+    }
+
+    /// Creates a flying crown for the animation
+    private func createFlyingCrown() -> SKSpriteNode {
+        // Golden color
+        let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+        let iconSize = CGSize(width: 30, height: 30)
+
+        if let crownImage = renderColoredSymbol(symbolName: "crown.fill", color: goldenColor, size: iconSize) {
+            let crownTexture = SKTexture(image: crownImage)
+            let crown = SKSpriteNode(texture: crownTexture)
+            crown.size = iconSize
+            return crown
+        }
+        // Fallback if SF Symbol isn't available
+        return SKSpriteNode()
+    }
+
+    private func transitionToCrownsUI() {
+        guard let container = progressionContainer else { return }
+
+        // Remove stars (they should already be faded out)
+        let removeStars = SKAction.run { [weak self] in
+            self?.starNodes.forEach { $0.removeFromParent() }
+            self?.starNodes.removeAll()
+        }
+
+        // Create crown slots (invisible, will animate in when earned)
+        let createCrowns = SKAction.run { [weak self] in
+            guard let self = self else { return }
+
+            for i in 0..<3 {
+                let crownNode = self.createCrownSlot()
+                crownNode.position = CGPoint(x: self.progressionStartX + CGFloat(i) * self.progressionSpacing, y: 0)
+                crownNode.name = "crown_\(i)"
+                container.addChild(crownNode)
+                self.crownNodes.append(crownNode)
+            }
+        }
+
+        container.run(SKAction.sequence([removeStars, createCrowns]))
+    }
+
+    private func hideProgressionUI() {
+        progressionContainer?.run(SKAction.fadeOut(withDuration: 0.5))
+    }
+
+    private func animateLevelUp(level: Int, isStar: Bool) {
+        guard let container = progressionContainer else { return }
+        let nodes = isStar ? starNodes : crownNodes
+        guard level > 0 && level <= nodes.count else { return }
+
+        // Calculate the target position for this level (relative to container)
+        let targetX = progressionStartX + CGFloat(level - 1) * progressionSpacing
+
+        // Calculate spawn position: center horizontally, near the score (which is at y: size.height - 120)
+        // Container is at y: size.height - 70, so relative to container, score is at y: -50
+        let spawnPosition = CGPoint(x: 0, y: -50)
+        let targetPosition = CGPoint(x: targetX, y: 0)
+
+        // Step 1: Fade in all outlines (greyed placeholders)
+        for node in nodes {
+            if let outline = node.childNode(withName: "outline") as? SKSpriteNode {
+                // For crowns, show at 0.3 alpha; for stars, show at 1.0
+                let targetAlpha: CGFloat = isStar ? 1.0 : 0.3
+                outline.run(SKAction.fadeAlpha(to: targetAlpha, duration: 0.2))
+            }
+        }
+
+        // Step 2: Also show previously earned filled icons
+        for i in 0..<(level - 1) {
+            if let filled = nodes[i].childNode(withName: "filled") as? SKSpriteNode {
+                filled.run(SKAction.fadeIn(withDuration: 0.2))
+            }
+            // Hide outline for already-earned slots
+            if let outline = nodes[i].childNode(withName: "outline") as? SKSpriteNode {
+                outline.run(SKAction.fadeOut(withDuration: 0.2))
+            }
+        }
+
+        // Step 3: Create the flying icon
+        let flyingIcon: SKSpriteNode
+        if isStar {
+            flyingIcon = createFlyingStar()
+        } else {
+            flyingIcon = createFlyingCrown()
+        }
+        flyingIcon.position = spawnPosition
+        flyingIcon.alpha = 0
+        flyingIcon.setScale(2.5)  // Start much larger, shrinks as it moves to slot
+        flyingIcon.zPosition = 50  // Appear on top of score label
+        container.addChild(flyingIcon)
+
+        // Animation sequence:
+        // 1. Wait for outlines to appear
+        // 2. Fade in the flying icon
+        // 3. Pause while stationary (let user see it)
+        // 4. Move and shrink into the slot
+        let initialDelay = SKAction.wait(forDuration: 0.15)  // Wait for outlines to appear
+        let fadeIn = SKAction.fadeIn(withDuration: 0.2)
+        let stationaryPause = SKAction.wait(forDuration: 0.3)  // Stay in place briefly
+        let moveAndScale = SKAction.group([
+            SKAction.move(to: targetPosition, duration: 0.4),
+            SKAction.scale(to: 1.0, duration: 0.4)
+        ])
+        moveAndScale.timingMode = .easeOut
+
+        // When flying icon arrives, show the filled version in the slot and hide outline
+        let showFilledInSlot = SKAction.run { [weak self] in
+            guard let self = self else { return }
+            let targetNode = nodes[level - 1]
+            if let filled = targetNode.childNode(withName: "filled") as? SKSpriteNode {
+                filled.alpha = 1.0
+            }
+            if let outline = targetNode.childNode(withName: "outline") as? SKSpriteNode {
+                outline.alpha = 0
+            }
+            // Remove the flying icon (it's now "in" the slot)
+            flyingIcon.removeFromParent()
+
+            // Schedule the fade out on the container (since flyingIcon will be removed)
+            let pause = SKAction.wait(forDuration: 1.2)  // Wait longer before fading out
+            let fadeOutAll = SKAction.run {
+                let fadeOut = SKAction.fadeOut(withDuration: 0.5)
+                for i in 0..<level {
+                    nodes[i].childNode(withName: "filled")?.run(fadeOut)
+                    nodes[i].childNode(withName: "outline")?.run(fadeOut)
+                }
+                // Also fade out unfilled outlines
+                for i in level..<nodes.count {
+                    nodes[i].childNode(withName: "outline")?.run(fadeOut)
+                }
+            }
+            container.run(SKAction.sequence([pause, fadeOutAll]))
+        }
+
+        flyingIcon.run(SKAction.sequence([initialDelay, fadeIn, stationaryPause, moveAndScale, showFilledInSlot]))
     }
 
     // MARK: - Touch Handling
@@ -519,6 +816,9 @@ class GameScene: SKScene {
     }
 
     private func handleTileTap(_ tile: TileNode) {
+        // Track whether this completes a note event for progression
+        var completesNoteEvent = true
+
         // For double tile pairs: first tap plays first note, second tap plays second note
         // This ensures musical order is preserved regardless of which physical tile is tapped first
         if tile.isDoubleTilePair, let pairNotes = tile.pairNotes, let pairDurations = tile.pairDurations, let pairInstruments = tile.pairInstruments {
@@ -531,10 +831,12 @@ class GameScene: SKScene {
                 // First tap of the pair - play the first notes with their instruments
                 let adjustedDurations = adjustDurations(pairDurations[0], tile: tile)
                 AudioManager.shared.playShortNotes(pairNotes[0], durations: adjustedDurations, instruments: pairInstruments[0])
+                completesNoteEvent = false  // Wait for second tile to complete the note event
             } else {
                 // Second tap of the pair - play the second notes with their instruments
                 let adjustedDurations = adjustDurations(pairDurations[1], tile: tile)
                 AudioManager.shared.playShortNotes(pairNotes[1], durations: adjustedDurations, instruments: pairInstruments[1])
+                completesNoteEvent = true  // Both tiles tapped, note event complete
             }
         } else {
             // Normal tile - play its assigned notes with their instruments
@@ -551,6 +853,11 @@ class GameScene: SKScene {
 
         score += 1
         updateScoreDisplay()
+
+        // Track progression (only when a full note event is completed)
+        if completesNoteEvent {
+            onNoteCompleted()
+        }
     }
 
     private func completeLongTile(_ tile: TileNode) {
@@ -575,6 +882,17 @@ class GameScene: SKScene {
         }
         // Prematurely released: leave fill where it is (no visual change)
 
+        // Track whether this completes a note event for progression
+        // For double-long-tile pairs, only count when the second tile is completed
+        var completesNoteEvent = true
+        if tile.isDoubleTilePair {
+            // Check if sibling is still being held or active (not yet in tappedTiles)
+            let siblingStillActive = tile.siblingTile.map { sibling in
+                activeTiles.contains(where: { $0 === sibling }) || heldLongTiles.contains(where: { $0 === sibling })
+            } ?? false
+            completesNoteEvent = !siblingStillActive  // Only complete when sibling is also done
+        }
+
         // Move from active to tapped tiles
         activeTiles.removeAll { $0 === tile }
         tappedTiles.append(tile)
@@ -592,6 +910,124 @@ class GameScene: SKScene {
             score += 1
         }
         updateScoreDisplay()
+
+        // Track progression (only when a full note event is completed)
+        if completesNoteEvent {
+            onNoteCompleted()
+        }
+    }
+
+    // MARK: - Progression System
+
+    /// Called when a note event is completed (tile tapped or long tile finished)
+    /// For double tiles, only call when the SECOND tile of the pair is tapped
+    private func onNoteCompleted() {
+        guard totalNotesInSong > 0 else { return }
+        guard !isInGapPeriod else { return }
+
+        notesPlayedInCurrentLoop += 1
+
+        // Check for progression thresholds based on current tier
+        switch progressionTier {
+        case .stars:
+            checkStarProgression()
+        case .crowns:
+            checkCrownProgression()
+        case .endless:
+            // No more levels to track
+            break
+        }
+    }
+
+    private func checkStarProgression() {
+        let progress = Double(notesPlayedInCurrentLoop) / Double(totalNotesInSong)
+
+        // Check star thresholds: 33%, 66%, 100%
+        let newStars: Int
+        if progress >= 1.0 {
+            newStars = 3
+        } else if progress >= 0.66 {
+            newStars = 2
+        } else if progress >= 0.33 {
+            newStars = 1
+        } else {
+            newStars = 0
+        }
+
+        if newStars > currentStars {
+            currentStars = newStars
+            animateLevelUp(level: currentStars, isStar: true)
+
+            // After 3 stars, start gap period before crowns
+            if currentStars == 3 {
+                startGapPeriod()
+            }
+        }
+    }
+
+    private func checkCrownProgression() {
+        let progress = Double(notesPlayedInCurrentLoop) / Double(totalNotesInSong)
+
+        // Check crown thresholds: 33%, 66%, 100%
+        let newCrowns: Int
+        if progress >= 1.0 {
+            newCrowns = 3
+        } else if progress >= 0.66 {
+            newCrowns = 2
+        } else if progress >= 0.33 {
+            newCrowns = 1
+        } else {
+            newCrowns = 0
+        }
+
+        if newCrowns > currentCrowns {
+            currentCrowns = newCrowns
+            animateLevelUp(level: currentCrowns, isStar: false)
+
+            // After 3 crowns, enter endless mode
+            if currentCrowns == 3 {
+                enterEndlessMode()
+            }
+        }
+    }
+
+    private func startGapPeriod() {
+        isInGapPeriod = true
+        gapStartTime = lastUpdateTime
+    }
+
+    private func endGapPeriod() {
+        isInGapPeriod = false
+        progressionTier = .crowns
+        notesPlayedInCurrentLoop = 0
+        loopCount += 1
+        currentNoteIndex = 0  // Reset to beginning for crowns phase
+
+        // Switch UI from stars to crowns
+        transitionToCrownsUI()
+    }
+
+    private func enterEndlessMode() {
+        progressionTier = .endless
+        // Delay hiding the UI to let the 3rd crown animation complete
+        // Animation takes ~2.75s (0.15 delay + 0.2 fade + 0.3 stationary + 0.4 move + 1.2 pause + 0.5 fade out)
+        let delay = SKAction.wait(forDuration: 2.8)
+        let hide = SKAction.run { [weak self] in
+            self?.hideProgressionUI()
+        }
+        progressionContainer?.run(SKAction.sequence([delay, hide]))
+    }
+
+    /// Called when the song loops (all notes have been spawned and we reset to beginning)
+    private func onSongLoop() {
+        // This is called when SPAWNING loops, not when PLAYING loops
+        // Don't reset notesPlayedInCurrentLoop here - it tracks player progress, not spawning
+        // During crowns phase, let the player finish tapping to earn all 3 crowns
+        // During endless mode, we can reset for tracking purposes
+        if progressionTier == .endless {
+            notesPlayedInCurrentLoop = 0
+        }
+        loopCount += 1
     }
 
     // MARK: - Point Animation
@@ -722,6 +1158,20 @@ class GameScene: SKScene {
         // Reset beatmap state
         currentNoteIndex = 0
         songStartTime = 0
+
+        // Reset progression state
+        progressionTier = .stars
+        currentStars = 0
+        currentCrowns = 0
+        loopCount = 0
+        notesPlayedInCurrentLoop = 0
+        isInGapPeriod = false
+
+        // Remove progression UI
+        progressionContainer?.removeFromParent()
+        progressionContainer = nil
+        starNodes.removeAll()
+        crownNodes.removeAll()
 
         // Remove score label (will be re-added when game starts)
         scoreLabel?.removeFromParent()
@@ -966,10 +1416,24 @@ class GameScene: SKScene {
             }
         }
 
+        // Handle gap period timing
+        if isInGapPeriod {
+            let gapElapsed = currentTime - gapStartTime
+            if gapElapsed >= gapDuration {
+                endGapPeriod()
+            }
+            // During gap: tiles continue moving but no spawning
+            return
+        }
+
         // Beatmap-driven spawning
         if let beatmap = beatmap {
+            // During stars phase, don't spawn beyond the first loop
+            // This prevents extra notes appearing after 3 stars
+            let canSpawn = progressionTier != .stars || currentNoteIndex < beatmap.notes.count
+
             // Spawn tiles when topmost tile has moved down enough and there are more notes
-            while currentNoteIndex < beatmap.notes.count {
+            while canSpawn && currentNoteIndex < beatmap.notes.count {
                 // Find the topmost tile - check active tiles first, then tapped tiles as fallback
                 let topmostActive = activeTiles.max(by: { $0.position.y < $1.position.y })
                 let topmostTapped = tappedTiles.max(by: { $0.position.y < $1.position.y })
@@ -1000,9 +1464,10 @@ class GameScene: SKScene {
                 }
             }
 
-            // Loop the song when all notes have been spawned
-            if currentNoteIndex >= beatmap.notes.count {
+            // Loop the song when all notes have been spawned (only after stars phase)
+            if currentNoteIndex >= beatmap.notes.count && progressionTier != .stars {
                 currentNoteIndex = 0  // Reset to beginning for infinite loop
+                onSongLoop()
             }
         }
     }
