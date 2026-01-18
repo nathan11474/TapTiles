@@ -288,15 +288,59 @@ class SongListScene: SKScene {
         songBox.position = CGPoint(x: songBoxX, y: 0)
         container.addChild(songBox)
 
-        // Song title (inside song box)
+        // Get progress for this song
+        let progress = ProgressManager.shared.getProgress(for: song.id)
+        let hasProgress = progress.highScore > 0 || progress.stars > 0 || progress.crowns > 0
+
+        // Song title (inside song box) - positioned higher if we have progress to show
         let titleLabel = SKLabelNode(text: song.title)
         titleLabel.fontName = "Helvetica"
-        titleLabel.fontSize = 14  // Change this value to adjust song name font size
+        titleLabel.fontSize = 14
         titleLabel.fontColor = .black
         titleLabel.horizontalAlignmentMode = .left
         titleLabel.verticalAlignmentMode = .center
-        titleLabel.position = CGPoint(x: padding + difficultyBoxWidth + 20, y: 0)
+        titleLabel.position = CGPoint(x: padding + difficultyBoxWidth + 20, y: hasProgress ? 10 : 0)
         container.addChild(titleLabel)
+
+        // Progress info (high score and stars/crowns)
+        if hasProgress {
+            let progressNode = SKNode()
+            progressNode.position = CGPoint(x: padding + difficultyBoxWidth + 20, y: -10)
+
+            // High score
+            let scoreLabel = SKLabelNode(text: "High Score: \(progress.highScore)")
+            scoreLabel.fontName = "Helvetica"
+            scoreLabel.fontSize = 11
+            scoreLabel.fontColor = .darkGray
+            scoreLabel.horizontalAlignmentMode = .left
+            scoreLabel.verticalAlignmentMode = .center
+            progressNode.addChild(scoreLabel)
+
+            // Stars or crowns (show crowns if any, otherwise show stars)
+            let earnedCount = progress.crowns > 0 ? progress.crowns : progress.stars
+            let filledSymbol = progress.crowns > 0 ? "crown.fill" : "star.fill"
+            let outlineSymbol = progress.crowns > 0 ? "crown" : "star"
+
+            let iconSpacing: CGFloat = 14
+            let scoreWidth: CGFloat = 100  // Approximate width of score text
+            let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+            let iconSize = CGSize(width: 12, height: 12)
+
+            // Show all 3 icons (filled for earned, outlined for remaining)
+            for i in 0..<3 {
+                let isFilled = i < earnedCount
+                let symbolName = isFilled ? filledSymbol : outlineSymbol
+                let color = isFilled ? goldenColor : .lightGray
+
+                if let iconTexture = renderProgressIcon(symbolName: symbolName, color: color, size: iconSize) {
+                    let iconNode = SKSpriteNode(texture: iconTexture)
+                    iconNode.position = CGPoint(x: scoreWidth + CGFloat(i) * iconSpacing, y: 0)
+                    progressNode.addChild(iconNode)
+                }
+            }
+
+            container.addChild(progressNode)
+        }
 
         // Play button container (larger hit area) - positioned relative to container
         let playButtonContainer = SKNode()
@@ -501,6 +545,37 @@ class SongListScene: SKScene {
         let gameScene = GameScene(size: size, songURL: song.url, customSpeed: song.customSpeed, startFromNote: song.startFromNote)
         gameScene.scaleMode = scaleMode
         view?.presentScene(gameScene)
+    }
+
+    // MARK: - Progress Icon Rendering
+
+    /// Renders a colored SF Symbol as a texture for progress display
+    private func renderProgressIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {
+        let config = UIImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+        guard let symbolImage = UIImage(systemName: symbolName, withConfiguration: config) else {
+            return nil
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            color.setFill()
+
+            // Scale symbol to fit within bounds while maintaining aspect ratio
+            let symbolSize = symbolImage.size
+            let scale = min(size.width / symbolSize.width, size.height / symbolSize.height)
+            let scaledWidth = symbolSize.width * scale
+            let scaledHeight = symbolSize.height * scale
+
+            // Center the symbol
+            let x = (size.width - scaledWidth) / 2
+            let y = (size.height - scaledHeight) / 2
+            let drawRect = CGRect(x: x, y: y, width: scaledWidth, height: scaledHeight)
+
+            symbolImage.draw(in: drawRect, blendMode: .normal, alpha: 1.0)
+            context.fill(CGRect(origin: .zero, size: size), blendMode: .sourceIn)
+        }
+
+        return SKTexture(image: image)
     }
 }
 

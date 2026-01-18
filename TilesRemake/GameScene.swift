@@ -4,6 +4,7 @@
 //
 
 import SpriteKit
+import UIKit
 
 class GameScene: SKScene {
 
@@ -22,6 +23,11 @@ class GameScene: SKScene {
     private let songURL: URL
     private let customSpeed: CGFloat?  // Optional custom speed override
     private let startFromNote: Int?    // Optional note index to start from
+
+    /// Song identifier for progress tracking
+    private var songId: String {
+        return songURL.deletingPathExtension().lastPathComponent
+    }
 
     // MARK: - Initializers
 
@@ -958,6 +964,9 @@ class GameScene: SKScene {
             currentStars = newStars
             animateLevelUp(level: currentStars, isStar: true)
 
+            // Save progress to iCloud
+            ProgressManager.shared.updateStars(for: songId, stars: currentStars)
+
             // After 3 stars, start gap period before crowns
             if currentStars == 3 {
                 startGapPeriod()
@@ -983,6 +992,9 @@ class GameScene: SKScene {
         if newCrowns > currentCrowns {
             currentCrowns = newCrowns
             animateLevelUp(level: currentCrowns, isStar: false)
+
+            // Save progress to iCloud
+            ProgressManager.shared.updateCrowns(for: songId, crowns: currentCrowns)
 
             // After 3 crowns, enter endless mode
             if currentCrowns == 3 {
@@ -1075,6 +1087,9 @@ class GameScene: SKScene {
     }
 
     private func showGameOverScreen() {
+        // Save high score to iCloud
+        ProgressManager.shared.updateHighScore(for: songId, score: score)
+
         // Semi-transparent overlay
         let overlay = SKSpriteNode(color: UIColor.black.withAlphaComponent(0.5), size: size)
         overlay.position = CGPoint(x: size.width / 2, y: size.height / 2)
