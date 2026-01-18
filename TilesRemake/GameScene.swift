@@ -97,6 +97,10 @@ class GameScene: SKScene {
     private var starNodes: [SKNode] = []
     private var crownNodes: [SKNode] = []
 
+    // Song info bar (shown before game starts)
+    private var songInfoBar: SKNode?
+    private let songInfoBarHeight: CGFloat = 150
+
     // MARK: - Scene Lifecycle
 
     override func didMove(to view: SKView) {
@@ -180,6 +184,9 @@ class GameScene: SKScene {
     // MARK: - Start Screen
 
     private func showStartScreen() {
+        // Create song info bar at bottom
+        createSongInfoBar()
+
         // Reset note index for new game (or skip to startFromNote if set)
         let startIndex = startFromNote ?? 0
         currentNoteIndex = min(startIndex, (beatmap?.notes.count ?? 1) - 1)
@@ -218,11 +225,10 @@ class GameScene: SKScene {
 
         let tile = TileNode(column: column, size: tileSize, tileLength: tileLength, midiNotes: midiNotes, noteDurations: noteDurations, instruments: instruments, gapToNextNote: gapToNextNote)
 
-        // Position at the bottom of the screen (so bottom edge touches screen bottom)
-        // For long tiles, the center is higher due to larger size
+        // Position above the song info bar (so bottom edge touches top of bar)
         tile.position = CGPoint(
             x: columnPositions[column],
-            y: tile.size.height / 2
+            y: songInfoBarHeight + tile.size.height / 2
         )
 
         // Add "Play" label to the first (bottom) segment
@@ -246,7 +252,110 @@ class GameScene: SKScene {
         spawnInitialTiles()
     }
 
+    private func createSongInfoBar() {
+        let bar = SKNode()
+        bar.zPosition = 50
+
+        // Background (white)
+        let background = SKSpriteNode(color: .white, size: CGSize(width: size.width, height: songInfoBarHeight))
+        background.anchorPoint = CGPoint(x: 0, y: 0)
+        background.position = .zero
+        bar.addChild(background)
+
+        // Top border (black line)
+        let borderHeight: CGFloat = 2
+        let border = SKSpriteNode(color: .black, size: CGSize(width: size.width, height: borderHeight))
+        border.anchorPoint = CGPoint(x: 0, y: 0)
+        border.position = CGPoint(x: 0, y: songInfoBarHeight - borderHeight)
+        bar.addChild(border)
+
+        let leftPadding: CGFloat = 20
+        let iconSize = CGSize(width: 24, height: 24)
+        let iconTextSpacing: CGFloat = 10
+        let rowSpacing: CGFloat = 30  // Vertical spacing between rows
+
+        // Music note icon for song title (light purple, matching long tile fill color)
+        let iconColor = TileNode.longTileFillColor
+        if let musicIcon = renderSongInfoIcon(symbolName: "music.note", color: iconColor, size: iconSize) {
+            let musicIconNode = SKSpriteNode(texture: musicIcon)
+            musicIconNode.position = CGPoint(x: leftPadding + iconSize.width / 2, y: songInfoBarHeight / 2 + rowSpacing)
+            bar.addChild(musicIconNode)
+        }
+
+        // Song title (formatted from URL, truncated if too long)
+        let songTitle = SongInfo.formatTitle(from: songId)
+        let titleLabel = SKLabelNode(text: songTitle)
+        titleLabel.fontName = "Helvetica"
+        titleLabel.fontSize = 22
+        titleLabel.fontColor = .black
+        titleLabel.horizontalAlignmentMode = .left
+        titleLabel.verticalAlignmentMode = .center
+        titleLabel.position = CGPoint(x: leftPadding + iconSize.width + iconTextSpacing, y: songInfoBarHeight / 2 + rowSpacing)
+
+        // Truncate if too long
+        let maxWidth = size.width - leftPadding - iconSize.width - iconTextSpacing - 20  // 20px right padding
+        truncateLabelIfNeeded(titleLabel, maxWidth: maxWidth)
+
+        bar.addChild(titleLabel)
+
+        // Trophy icon for high score (purple, matching long tile color)
+        if let trophyIcon = renderSongInfoIcon(symbolName: "trophy.fill", color: iconColor, size: iconSize) {
+            let trophyIconNode = SKSpriteNode(texture: trophyIcon)
+            trophyIconNode.position = CGPoint(x: leftPadding + iconSize.width / 2, y: songInfoBarHeight / 2 - rowSpacing)
+            bar.addChild(trophyIconNode)
+        }
+
+        // High score
+        let progress = ProgressManager.shared.getProgress(for: songId)
+        let highScoreText = progress.highScore > 0 ? "High Score: \(progress.highScore)" : "No high score yet"
+        let highScoreLabel = SKLabelNode(text: highScoreText)
+        highScoreLabel.fontName = "Helvetica"
+        highScoreLabel.fontSize = 22
+        highScoreLabel.fontColor = .black
+        highScoreLabel.horizontalAlignmentMode = .left
+        highScoreLabel.verticalAlignmentMode = .center
+        highScoreLabel.position = CGPoint(x: leftPadding + iconSize.width + iconTextSpacing, y: songInfoBarHeight / 2 - rowSpacing)
+        bar.addChild(highScoreLabel)
+
+        addChild(bar)
+        songInfoBar = bar
+    }
+
+    private func renderSongInfoIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {
+        let config = UIImage.SymbolConfiguration(pointSize: size.height, weight: .regular)
+        guard let symbolImage = UIImage(systemName: symbolName, withConfiguration: config) else {
+            return nil
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            color.setFill()
+            // Draw symbol stretched to fill the square bounds
+            let drawRect = CGRect(origin: .zero, size: size)
+            symbolImage.draw(in: drawRect, blendMode: .normal, alpha: 1.0)
+            context.fill(drawRect, blendMode: .sourceIn)
+        }
+        return SKTexture(image: image)
+    }
+
+    private func truncateLabelIfNeeded(_ label: SKLabelNode, maxWidth: CGFloat) {
+        guard var text = label.text, label.frame.width > maxWidth else { return }
+
+        while label.frame.width > maxWidth && text.count > 1 {
+            text = String(text.dropLast())
+            label.text = text + "..."
+        }
+    }
+
+    private func hideSongInfoBar() {
+        // Bar will scroll away with the game movement in update()
+        // Just mark it for removal once off-screen
+    }
+
     private func startGame() {
+        // Hide the song info bar
+        hideSongInfoBar()
+
         // Handle the play tile like a normal tile tap (for non-long tiles)
         if let tile = playTile {
             // Remove the "Play" label
@@ -269,6 +378,9 @@ class GameScene: SKScene {
     }
 
     private func startGameWithLongPlayTile(_ tile: TileNode, touchLocation: CGPoint, touch: UITouch) {
+        // Hide the song info bar
+        hideSongInfoBar()
+
         // Remove the "Play" label
         tile.childNode(withName: "playLabel")?.removeFromParent()
 
@@ -1395,6 +1507,16 @@ class GameScene: SKScene {
         }
         for tile in tappedTiles {
             tile.position.y -= moveDistance
+        }
+
+        // Move song info bar with the scroll (if still visible)
+        if let bar = songInfoBar {
+            bar.position.y -= moveDistance
+            // Remove once fully off-screen
+            if bar.position.y < -songInfoBarHeight {
+                bar.removeFromParent()
+                songInfoBar = nil
+            }
         }
 
         // Update all held long tiles - check for segment completion
