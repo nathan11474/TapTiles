@@ -11,26 +11,118 @@ class AudioManager {
 
     private let engine: AVAudioEngine
     private let sampler: AVAudioUnitSampler
-    private var isSetup: Bool = false
     private var noteGenerations: [UInt8: Int] = [:]
 
     // Sustain pedal state (CC64)
     private var sustainPedalOn: Bool = false
+
+    // Async setup state
+    private var isSetup: Bool = false
+    private var isSettingUp: Bool = false
+    private var setupCompletionHandlers: [() -> Void] = []
+    private let stateQueue = DispatchQueue(label: "com.tilesremake.audiomanager.state")
+
+    /// Whether audio is ready to use
+    var isReady: Bool {
+        return stateQueue.sync { isSetup }
+    }
 
     private init() {
         engine = AVAudioEngine()
         sampler = AVAudioUnitSampler()
     }
 
+    /// Synchronous setup - blocks until complete (waits if async setup is in progress)
     func setup() {
-        guard !isSetup else { return }
+        // If already set up, return immediately
+        if stateQueue.sync(execute: { isSetup }) {
+            return
+        }
 
+        // Use a semaphore to wait for completion
+        let semaphore = DispatchSemaphore(value: 0)
+        setupInternal(dispatchToMain: false) { semaphore.signal() }
+        semaphore.wait()
+    }
+
+    /// Async setup - returns immediately, calls completion on main thread when done
+    func setupAsync(completion: (() -> Void)? = nil) {
+        // Check if already set up
+        let alreadySetup = stateQueue.sync { isSetup }
+        if alreadySetup {
+            if let completion = completion {
+                DispatchQueue.main.async { completion() }
+            }
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.setupInternal(dispatchToMain: true, completion: completion)
+        }
+    }
+
+    /// Internal setup that handles both sync and async cases
+    /// - Parameters:
+    ///   - dispatchToMain: If true, completion handlers are called on main thread
+    ///   - completion: Optional completion handler
+    private func setupInternal(dispatchToMain: Bool, completion: (() -> Void)?) {
+        // Thread-safe state check and update
+        let shouldPerformSetup = stateQueue.sync { () -> Bool in
+            if isSetup {
+                // Already set up - just call completion
+                if let completion = completion {
+                    if dispatchToMain {
+                        DispatchQueue.main.async { completion() }
+                    } else {
+                        completion()
+                    }
+                }
+                return false
+            }
+
+            if isSettingUp {
+                // Setup in progress - queue completion handler with dispatch preference
+                if let completion = completion {
+                    let wrappedCompletion: () -> Void = dispatchToMain
+                        ? { DispatchQueue.main.async { completion() } }
+                        : completion
+                    setupCompletionHandlers.append(wrappedCompletion)
+                }
+                return false
+            }
+
+            // Start setup
+            isSettingUp = true
+            if let completion = completion {
+                let wrappedCompletion: () -> Void = dispatchToMain
+                    ? { DispatchQueue.main.async { completion() } }
+                    : completion
+                setupCompletionHandlers.append(wrappedCompletion)
+            }
+            return true
+        }
+
+        guard shouldPerformSetup else { return }
+
+        // Perform actual setup (outside the lock)
         configureAudioSession()
         setupAudioEngine()
         loadSoundFont()
         startEngine()
 
-        isSetup = true
+        // Mark complete and notify all waiting handlers
+        let handlers = stateQueue.sync { () -> [() -> Void] in
+            isSetup = true
+            isSettingUp = false
+            let handlers = setupCompletionHandlers
+            setupCompletionHandlers.removeAll()
+            return handlers
+        }
+
+        // Call all completion handlers (dispatch is already baked into each handler)
+        for handler in handlers {
+            handler()
+        }
     }
 
     private func configureAudioSession() {
@@ -41,7 +133,9 @@ class AudioManager {
             try session.setPreferredSampleRate(48000)
             try session.setActive(true)
         } catch {
+            #if DEBUG
             print("AudioManager: Failed to configure audio session: \(error)")
+            #endif
         }
     }
 
@@ -52,11 +146,15 @@ class AudioManager {
 
     private func loadSoundFont() {
         guard let url = Bundle.main.url(forResource: "FluidR3_GM", withExtension: "sf2") else {
+            #if DEBUG
             print("AudioManager: Could not find FluidR3_GM.sf2 in bundle")
+            #endif
             return
         }
 
+        #if DEBUG
         print("AudioManager: Loading soundfont from \(url.lastPathComponent)")
+        #endif
 
         do {
             try sampler.loadSoundBankInstrument(
@@ -65,9 +163,13 @@ class AudioManager {
                 bankMSB: UInt8(kAUSampler_DefaultMelodicBankMSB),
                 bankLSB: 0
             )
+            #if DEBUG
             print("AudioManager: Soundfont loaded successfully (Piano only)")
+            #endif
         } catch {
+            #if DEBUG
             print("AudioManager: Failed to load soundfont: \(error)")
+            #endif
         }
     }
 
@@ -77,7 +179,9 @@ class AudioManager {
         do {
             try engine.start()
         } catch {
+            #if DEBUG
             print("AudioManager: Failed to start audio engine: \(error)")
+            #endif
         }
     }
 

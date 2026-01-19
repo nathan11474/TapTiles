@@ -29,6 +29,7 @@ class SongListScene: SKScene {
     // Search
     private var searchTextField: UITextField?
     private var searchQuery: String = ""
+    private var searchDebounceTimer: Timer?
 
     // Async difficulty loading
     private var loadingLabel: SKLabelNode?
@@ -56,12 +57,16 @@ class SongListScene: SKScene {
 
     override func didMove(to view: SKView) {
         backgroundColor = .white
+
+        // Start loading audio in background (will be ready by the time user picks a song)
+        AudioManager.shared.setupAsync()
+
         songs = SongManager.shared.availableSongs
 
-        // Check which songs need difficulty calculation
+        // Check which songs need difficulty calculation (validates fingerprint for changed files)
         var songsNeedingCalculation: [SongInfo] = []
         for song in songs {
-            if SongManager.shared.getCachedDifficulty(for: song.id) == nil {
+            if SongManager.shared.getCachedDifficulty(for: song.id, fileURL: song.url) == nil {
                 songsNeedingCalculation.append(song)
             }
         }
@@ -145,7 +150,12 @@ class SongListScene: SKScene {
 
     @objc private func searchTextChanged(_ textField: UITextField) {
         searchQuery = textField.text ?? ""
-        filterAndRebuildSongList()
+
+        // Debounce: wait for typing to stop before rebuilding
+        searchDebounceTimer?.invalidate()
+        searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
+            self?.filterAndRebuildSongList()
+        }
     }
 
     private func filterAndRebuildSongList() {
@@ -292,8 +302,8 @@ class SongListScene: SKScene {
         songBox.position = CGPoint(x: songBoxX, y: 0)
         container.addChild(songBox)
 
-        // Get progress for this song
-        let progress = ProgressManager.shared.getProgress(for: song.id)
+        // Get progress for this song (validates file hash to detect replaced files)
+        let progress = ProgressManager.shared.getProgress(for: song.id, fileURL: song.url)
         let hasProgress = progress.stars > 0 || progress.crowns > 0
 
         // Song title (top line)
@@ -334,7 +344,7 @@ class SongListScene: SKScene {
                 let symbolName = isFilled ? filledSymbol : outlineSymbol
                 let color = isFilled ? goldenColor : .lightGray
 
-                if let iconTexture = renderProgressIcon(symbolName: symbolName, color: color, size: iconSize) {
+                if let iconTexture = getProgressIcon(symbolName: symbolName, color: color, size: iconSize) {
                     let iconNode = SKSpriteNode(texture: iconTexture)
                     iconNode.position = CGPoint(x: iconStartX + CGFloat(i) * iconSpacing, y: -16)
                     container.addChild(iconNode)
@@ -417,8 +427,8 @@ class SongListScene: SKScene {
                 // Calculate difficulty (this is the expensive MIDI parsing)
                 let difficulty = self.calculateDifficulty(for: song)
 
-                // Cache the result
-                SongManager.shared.cacheDifficulty(difficulty, for: song.id)
+                // Cache the result with file fingerprint
+                SongManager.shared.cacheDifficulty(difficulty, for: song.id, fileURL: song.url)
 
                 // Update UI on main thread
                 DispatchQueue.main.async { [weak self] in
@@ -548,6 +558,24 @@ class SongListScene: SKScene {
     }
 
     // MARK: - Progress Icon Rendering
+
+    // Cache for progress icon textures (only 4 unique icons needed)
+    private static var cachedProgressIcons: [String: SKTexture] = [:]
+
+    /// Gets a cached progress icon texture, creating it if needed
+    private func getProgressIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {
+        let key = "\(symbolName)-\(color.cgColor.hashValue)"
+
+        if let cached = SongListScene.cachedProgressIcons[key] {
+            return cached
+        }
+
+        if let texture = renderProgressIcon(symbolName: symbolName, color: color, size: size) {
+            SongListScene.cachedProgressIcons[key] = texture
+            return texture
+        }
+        return nil
+    }
 
     /// Renders a colored SF Symbol as a texture for progress display
     private func renderProgressIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {

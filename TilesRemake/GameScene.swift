@@ -125,7 +125,9 @@ class GameScene: SKScene {
             // Use custom speed if provided, otherwise calculate from note density
             if let custom = customSpeed {
                 initialSpeed = custom
+                #if DEBUG
                 print("GameScene: Loaded beatmap '\(loadedBeatmap.title)' - using custom speed: \(String(format: "%.0f", initialSpeed))")
+                #endif
             } else {
                 // Calculate initial speed based on note density (notes per second)
                 // This ensures songs with sparse notes don't feel too slow
@@ -137,12 +139,16 @@ class GameScene: SKScene {
                 // This means one tile scrolls past per note on average
                 initialSpeed = estimatedTileHeight * notesPerSecond
 
+                #if DEBUG
                 print("GameScene: Loaded beatmap '\(loadedBeatmap.title)' - \(loadedBeatmap.notes.count) notes, \(String(format: "%.1f", loadedBeatmap.totalDuration))s, trimmed mean gap: \(String(format: "%.3f", loadedBeatmap.averageGap))s, threshold: \(String(format: "%.3f", longTileThreshold))s, speed: \(String(format: "%.0f", initialSpeed))")
+                #endif
             }
             currentSpeed = initialSpeed
 
         } else {
+            #if DEBUG
             print("GameScene: Failed to parse MIDI file at \(songURL)")
+            #endif
             // Fallback to default speed if no beatmap (~2 notes/sec)
             let estimatedTileHeight = size.height / GameConfig.visibleTileCount
             initialSpeed = estimatedTileHeight * 2.0
@@ -164,10 +170,8 @@ class GameScene: SKScene {
         // Add column divider lines
         for i in 1..<GameConfig.columnCount {
             let xPos = tileWidth * CGFloat(i)
-            let line = SKShapeNode(rectOf: CGSize(width: 1, height: size.height))
+            let line = SKSpriteNode(color: UIColor.lightGray.withAlphaComponent(0.3), size: CGSize(width: 1, height: size.height))
             line.position = CGPoint(x: xPos, y: size.height / 2)
-            line.strokeColor = UIColor.lightGray.withAlphaComponent(0.3)
-            line.lineWidth = 1
             addChild(line)
         }
     }
@@ -297,7 +301,7 @@ class GameScene: SKScene {
         }
 
         // High score
-        let progress = ProgressManager.shared.getProgress(for: songId)
+        let progress = ProgressManager.shared.getProgress(for: songId, fileURL: songURL)
         let highScoreText = progress.highScore > 0 ? "High Score: \(progress.highScore)" : "No high score yet"
         let highScoreLabel = SKLabelNode(text: highScoreText)
         highScoreLabel.fontName = "Helvetica"
@@ -536,36 +540,34 @@ class GameScene: SKScene {
         return container
     }
 
+    // Cached textures for flying star/crown animations (avoid recreating on each earn)
+    private static var cachedStarTexture: SKTexture?
+    private static var cachedCrownTexture: SKTexture?
+    private static let flyingIconSize = CGSize(width: 30, height: 30)
+    private static let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+
     /// Creates a flying star for the animation
     private func createFlyingStar() -> SKSpriteNode {
-        // Golden color
-        let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
-        let iconSize = CGSize(width: 30, height: 30)
-
-        if let starImage = renderColoredSymbol(symbolName: "star.fill", color: goldenColor, size: iconSize) {
-            let starTexture = SKTexture(image: starImage)
-            let star = SKSpriteNode(texture: starTexture)
-            star.size = iconSize
-            return star
+        if GameScene.cachedStarTexture == nil {
+            if let image = renderColoredSymbol(symbolName: "star.fill", color: GameScene.goldenColor, size: GameScene.flyingIconSize) {
+                GameScene.cachedStarTexture = SKTexture(image: image)
+            }
         }
-        // Fallback if SF Symbol isn't available
-        return SKSpriteNode()
+        let star = SKSpriteNode(texture: GameScene.cachedStarTexture)
+        star.size = GameScene.flyingIconSize
+        return star
     }
 
     /// Creates a flying crown for the animation
     private func createFlyingCrown() -> SKSpriteNode {
-        // Golden color
-        let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
-        let iconSize = CGSize(width: 30, height: 30)
-
-        if let crownImage = renderColoredSymbol(symbolName: "crown.fill", color: goldenColor, size: iconSize) {
-            let crownTexture = SKTexture(image: crownImage)
-            let crown = SKSpriteNode(texture: crownTexture)
-            crown.size = iconSize
-            return crown
+        if GameScene.cachedCrownTexture == nil {
+            if let image = renderColoredSymbol(symbolName: "crown.fill", color: GameScene.goldenColor, size: GameScene.flyingIconSize) {
+                GameScene.cachedCrownTexture = SKTexture(image: image)
+            }
         }
-        // Fallback if SF Symbol isn't available
-        return SKSpriteNode()
+        let crown = SKSpriteNode(texture: GameScene.cachedCrownTexture)
+        crown.size = GameScene.flyingIconSize
+        return crown
     }
 
     private func transitionToCrownsUI() {
@@ -1061,8 +1063,8 @@ class GameScene: SKScene {
             currentStars = newStars
             animateLevelUp(level: currentStars, isStar: true)
 
-            // Save progress to iCloud
-            ProgressManager.shared.updateStars(for: songId, stars: currentStars)
+            // Save progress
+            ProgressManager.shared.updateStars(for: songId, stars: currentStars, fileURL: songURL)
 
             // After 3 stars, start gap period before crowns
             if currentStars == 3 {
@@ -1090,8 +1092,8 @@ class GameScene: SKScene {
             currentCrowns = newCrowns
             animateLevelUp(level: currentCrowns, isStar: false)
 
-            // Save progress to iCloud
-            ProgressManager.shared.updateCrowns(for: songId, crowns: currentCrowns)
+            // Save progress
+            ProgressManager.shared.updateCrowns(for: songId, crowns: currentCrowns, fileURL: songURL)
 
             // After 3 crowns, enter endless mode
             if currentCrowns == 3 {
@@ -1184,8 +1186,8 @@ class GameScene: SKScene {
     }
 
     private func showGameOverScreen() {
-        // Save high score to iCloud
-        ProgressManager.shared.updateHighScore(for: songId, score: score)
+        // Save high score
+        ProgressManager.shared.updateHighScore(for: songId, score: score, fileURL: songURL)
 
         // Semi-transparent overlay
         let overlay = SKSpriteNode(color: UIColor.black.withAlphaComponent(0.5), size: size)

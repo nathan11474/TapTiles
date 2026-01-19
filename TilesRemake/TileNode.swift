@@ -64,8 +64,9 @@ class TileNode: SKSpriteNode {
     // Segment sprites for long tiles (bottom to top) - kept for compatibility
     private var segments: [SKSpriteNode] = []
 
-    // Fill node for long tile hold animation
-    private var fillNode: SKShapeNode?
+    // Fill nodes for long tile hold animation (split for performance - avoids SKShapeNode recreation every frame)
+    private var fillRectNode: SKSpriteNode?  // Rectangle body - resized each frame (cheap)
+    private var fillCapNode: SKShapeNode?    // Oval cap - repositioned each frame (cheap)
     private var fillCropNode: SKCropNode?
 
     // Expanded frame for hit detection
@@ -226,11 +227,12 @@ class TileNode: SKSpriteNode {
     static let fillSpawnOffset: CGFloat = 100
 
     private func updateFillShape(height: CGFloat, in cropNode: SKCropNode) {
-        // Remove old fill node
-        fillNode?.removeFromParent()
-
         guard height > 0 else {
-            fillNode = nil
+            // Remove fill nodes when height is zero
+            fillRectNode?.removeFromParent()
+            fillRectNode = nil
+            fillCapNode?.removeFromParent()
+            fillCapNode = nil
             return
         }
 
@@ -238,37 +240,48 @@ class TileNode: SKSpriteNode {
         let tileHeight = self.size.height
         let ovalHeight = TileNode.ovalHeight
 
-        let path = CGMutablePath()
+        // Dimensions with slight extension for edge coverage
+        let rectWidth = tileWidth + 2
+        let bottomY = -tileHeight / 2 - 1
+        let leftX = -tileWidth / 2 - 1
+        let rightX = tileWidth / 2 + 1
 
-        // Start at bottom-left (use slightly larger width to ensure edge coverage)
-        let bottomY = -tileHeight / 2 - 1  // Extend slightly below
-        let leftX = -tileWidth / 2 - 1     // Extend slightly left
-        let rightX = tileWidth / 2 + 1     // Extend slightly right
-        let topY = bottomY + height + 1    // +1 to match bottom extension
+        // Height of the rectangular portion (below the oval cap)
+        let rectHeight = max(0, height - ovalHeight + 1)
 
-        // Bottom edge (straight)
-        path.move(to: CGPoint(x: leftX, y: bottomY))
-        path.addLine(to: CGPoint(x: rightX, y: bottomY))
+        // Create nodes once, then just update properties
+        if fillRectNode == nil {
+            // Create the rectangular fill body (anchored at bottom center)
+            let rect = SKSpriteNode(color: TileNode.longTileFillColor, size: CGSize(width: rectWidth, height: 1))
+            rect.anchorPoint = CGPoint(x: 0.5, y: 0)
+            rect.position = CGPoint(x: 0, y: bottomY)
+            rect.zPosition = 1
+            cropNode.addChild(rect)
+            fillRectNode = rect
+        }
 
-        // Right edge up to where curve starts
-        path.addLine(to: CGPoint(x: rightX, y: topY - ovalHeight))
+        if fillCapNode == nil {
+            // Create the oval cap (created once with fixed shape)
+            let capPath = CGMutablePath()
+            capPath.move(to: CGPoint(x: rightX, y: 0))
+            capPath.addQuadCurve(to: CGPoint(x: leftX, y: 0),
+                                 control: CGPoint(x: 0, y: ovalHeight))
+            capPath.addLine(to: CGPoint(x: rightX, y: 0))
+            capPath.closeSubpath()
 
-        // Oval top using quadratic curve (more elliptical than arc)
-        // The crop mask will clip anything outside the tile bounds
-        path.addQuadCurve(to: CGPoint(x: leftX, y: topY - ovalHeight),
-                         control: CGPoint(x: 0, y: topY))
+            let cap = SKShapeNode(path: capPath)
+            cap.fillColor = TileNode.longTileFillColor
+            cap.strokeColor = .clear
+            cap.zPosition = 1
+            cropNode.addChild(cap)
+            fillCapNode = cap
+        }
 
-        // Left edge back down
-        path.addLine(to: CGPoint(x: leftX, y: bottomY))
-        path.closeSubpath()
+        // Update rectangle height (cheap operation)
+        fillRectNode?.size.height = rectHeight
 
-        let newFillNode = SKShapeNode(path: path)
-        newFillNode.fillColor = TileNode.longTileFillColor
-        newFillNode.strokeColor = .clear
-        newFillNode.zPosition = 1
-
-        cropNode.addChild(newFillNode)
-        fillNode = newFillNode
+        // Update cap position to sit on top of rectangle (cheap operation)
+        fillCapNode?.position.y = bottomY + rectHeight
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -361,9 +374,11 @@ class TileNode: SKSpriteNode {
         if isLongTile {
             // Make the background transparent
             self.color = TileNode.completedSegmentColor
-            // Remove fill and border
-            fillNode?.removeFromParent()
-            fillNode = nil
+            // Remove fill nodes and crop node
+            fillRectNode?.removeFromParent()
+            fillRectNode = nil
+            fillCapNode?.removeFromParent()
+            fillCapNode = nil
             fillCropNode?.removeFromParent()
             fillCropNode = nil
             // Remove any remaining children (like border)
@@ -381,9 +396,11 @@ class TileNode: SKSpriteNode {
         // Set background to light gray (matching completed normal tiles)
         self.color = .lightGray
 
-        // Remove the fill block and crop node
-        fillNode?.removeFromParent()
-        fillNode = nil
+        // Remove the fill nodes and crop node
+        fillRectNode?.removeFromParent()
+        fillRectNode = nil
+        fillCapNode?.removeFromParent()
+        fillCapNode = nil
         fillCropNode?.removeFromParent()
         fillCropNode = nil
 

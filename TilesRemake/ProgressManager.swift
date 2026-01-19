@@ -7,6 +7,7 @@ struct SongProgress: Codable {
     var highScore: Int = 0
     var stars: Int = 0      // 0-3
     var crowns: Int = 0     // 0-3
+    var fileHash: String?   // File fingerprint (size + modification date) to detect when file is replaced
 }
 
 // MARK: - Progress Manager
@@ -22,50 +23,70 @@ class ProgressManager {
     /// In-memory cache of progress data
     private var progressCache: [String: SongProgress] = [:]
 
+    /// In-memory cache of file hashes (computed once per session)
+    private var fileHashCache: [String: String] = [:]
+
     private init() {
         loadProgress()
     }
 
     // MARK: - Public API
 
-    /// Get progress for a specific song
-    func getProgress(for songId: String) -> SongProgress {
-        return progressCache[songId] ?? SongProgress()
+    /// Get progress for a specific song, validating against file hash if URL provided
+    func getProgress(for songId: String, fileURL: URL? = nil) -> SongProgress {
+        guard let progress = progressCache[songId] else {
+            return SongProgress()
+        }
+
+        // Only validate hash if there's actual progress and a stored hash to compare
+        if let url = fileURL, let storedHash = progress.fileHash,
+           progress.highScore > 0 || progress.stars > 0 || progress.crowns > 0 {
+            let currentHash = getFileHash(for: songId, url: url)
+            if currentHash != storedHash {
+                // File has changed - return empty progress (don't modify cache yet)
+                return SongProgress()
+            }
+        }
+
+        return progress
     }
 
     /// Update high score for a song (only saves if higher than existing)
-    func updateHighScore(for songId: String, score: Int) {
-        var progress = getProgress(for: songId)
+    func updateHighScore(for songId: String, score: Int, fileURL: URL) {
+        var progress = getProgress(for: songId, fileURL: fileURL)
         if score > progress.highScore {
             progress.highScore = score
+            progress.fileHash = getFileHash(for: songId, url: fileURL)
             progressCache[songId] = progress
             saveProgress()
         }
     }
 
     /// Update stars for a song (only saves if higher than existing)
-    func updateStars(for songId: String, stars: Int) {
-        var progress = getProgress(for: songId)
+    func updateStars(for songId: String, stars: Int, fileURL: URL) {
+        var progress = getProgress(for: songId, fileURL: fileURL)
         if stars > progress.stars {
             progress.stars = stars
+            progress.fileHash = getFileHash(for: songId, url: fileURL)
             progressCache[songId] = progress
             saveProgress()
         }
     }
 
     /// Update crowns for a song (only saves if higher than existing)
-    func updateCrowns(for songId: String, crowns: Int) {
-        var progress = getProgress(for: songId)
+    func updateCrowns(for songId: String, crowns: Int, fileURL: URL) {
+        var progress = getProgress(for: songId, fileURL: fileURL)
         if crowns > progress.crowns {
             progress.crowns = crowns
+            progress.fileHash = getFileHash(for: songId, url: fileURL)
             progressCache[songId] = progress
             saveProgress()
         }
     }
 
     /// Update all progress for a song at once
-    func updateProgress(for songId: String, score: Int, stars: Int, crowns: Int) {
-        var progress = getProgress(for: songId)
+    func updateProgress(for songId: String, score: Int, stars: Int, crowns: Int, fileURL: URL) {
+        var progress = getProgress(for: songId, fileURL: fileURL)
         var changed = false
 
         if score > progress.highScore {
@@ -82,12 +103,38 @@ class ProgressManager {
         }
 
         if changed {
+            progress.fileHash = getFileHash(for: songId, url: fileURL)
             progressCache[songId] = progress
             saveProgress()
         }
     }
 
     // MARK: - Private Methods
+
+    /// Get file hash from cache, or compute and cache it
+    private func getFileHash(for songId: String, url: URL) -> String? {
+        // Return cached hash if available
+        if let cachedHash = fileHashCache[songId] {
+            return cachedHash
+        }
+
+        // Compute hash and cache it
+        guard let hash = computeFileHash(url: url) else {
+            return nil
+        }
+        fileHashCache[songId] = hash
+        return hash
+    }
+
+    /// Compute a fingerprint from file metadata (size + modification date) to detect changes
+    private func computeFileHash(url: URL) -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modDate = attrs[.modificationDate] as? Date,
+              let fileSize = attrs[.size] as? Int else {
+            return nil
+        }
+        return "\(fileSize)-\(Int(modDate.timeIntervalSince1970))"
+    }
 
     private func loadProgress() {
         if let data = defaults.data(forKey: storageKey),

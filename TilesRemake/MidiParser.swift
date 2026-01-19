@@ -61,26 +61,34 @@ class MidiParser {
         var status = NewMusicSequence(&sequence)
 
         guard status == noErr, let seq = sequence else {
+            #if DEBUG
             print("MidiParser: Failed to create MusicSequence: \(status)")
+            #endif
             return nil
         }
 
         // Load MIDI file
         status = MusicSequenceFileLoad(seq, url as CFURL, .midiType, .smf_ChannelsToTracks)
         guard status == noErr else {
+            #if DEBUG
             print("MidiParser: Failed to load MIDI file: \(status)")
+            #endif
             DisposeMusicSequence(seq)
             return nil
         }
 
         // Extract tempo
         let tempo = extractTempo(from: seq)
+        #if DEBUG
         print("MidiParser: Extracted tempo: \(tempo) BPM")
+        #endif
 
         // Get track count
         var trackCount: UInt32 = 0
         MusicSequenceGetTrackCount(seq, &trackCount)
+        #if DEBUG
         print("MidiParser: Found \(trackCount) tracks")
+        #endif
 
         // Collect all notes and sustain events from all tracks
         var allNotes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8)] = []
@@ -93,19 +101,25 @@ class MidiParser {
             if let track = track {
                 let trackNotes = parseTrack(track, tempo: tempo, sustainEvents: &allSustainEvents)
                 allNotes.append(contentsOf: trackNotes)
+                #if DEBUG
                 print("MidiParser: Track \(i) has \(trackNotes.count) notes")
+                #endif
             }
         }
 
         // Sort sustain events by time
         allSustainEvents.sort { $0.time < $1.time }
+        #if DEBUG
         print("MidiParser: Found \(allSustainEvents.count) sustain pedal events")
+        #endif
 
         // Sort by time
         allNotes.sort { $0.time < $1.time }
 
         guard !allNotes.isEmpty else {
+            #if DEBUG
             print("MidiParser: No notes found in MIDI file")
+            #endif
             DisposeMusicSequence(seq)
             return nil
         }
@@ -139,7 +153,9 @@ class MidiParser {
         // Extract title from filename
         let title = url.deletingPathExtension().lastPathComponent
 
+        #if DEBUG
         print("MidiParser: Parsed '\(title)' - \(mergedNotes.count) events (\(doubleTileCount) double tiles), \(String(format: "%.1f", songEnd))s, trimmed mean gap: \(String(format: "%.3f", averageGap))s")
+        #endif
 
         DisposeMusicSequence(seq)
 
@@ -274,16 +290,9 @@ class MidiParser {
         // Tolerance for considering notes as simultaneous (in seconds)
         let chordTolerance: TimeInterval = 0.02
 
-        // Helper: determine if sustain pedal is on at a given time
-        // Sustain is ON when value >= 64, OFF when < 64
-        func isSustainOn(at time: TimeInterval) -> Bool {
-            var sustainOn = false
-            for event in sustainEvents {
-                if event.time > time { break }
-                sustainOn = event.value >= 64
-            }
-            return sustainOn
-        }
+        // Track sustain pedal state incrementally (both arrays are time-sorted)
+        var sustainIndex = 0
+        var currentSustainState = false
 
         // Group notes into chords based on timing
         // Stores individual durations per note (parallel arrays)
@@ -331,8 +340,12 @@ class MidiParser {
                 gapToNext = max(songEnd - group.time, 1.0)
             }
 
-            // Determine sustain pedal state at this note's time
-            let sustainOn = isSustainOn(at: group.time)
+            // Advance through sustain events up to this chord's time
+            while sustainIndex < sustainEvents.count && sustainEvents[sustainIndex].time <= group.time {
+                currentSustainState = sustainEvents[sustainIndex].value >= 64
+                sustainIndex += 1
+            }
+            let sustainOn = currentSustainState
 
             noteEvents.append(NoteEvent(
                 time: group.time,
