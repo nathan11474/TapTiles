@@ -131,6 +131,7 @@ class SongListScene: SKScene {
         textField.placeholder = "Search songs..."
         textField.borderStyle = .roundedRect
         textField.backgroundColor = UIColor(white: 0.95, alpha: 1.0)
+        textField.textColor = .black
         textField.font = UIFont.systemFont(ofSize: 16)
         textField.clearButtonMode = .whileEditing
         textField.autocorrectionType = .no
