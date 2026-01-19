@@ -11,7 +11,6 @@ class TileNode: SKSpriteNode {
     let unitHeight: CGFloat  // Height of one tile unit
     var midiNotes: [UInt8] = [60]  // MIDI notes to play (multiple = chord)
     var noteDurations: [TimeInterval] = [0.5]  // Individual durations per note (parallel array with midiNotes)
-    var instruments: [UInt8] = [0]  // General MIDI instruments (parallel array with midiNotes)
     var gapToNextNote: TimeInterval = 0.5  // MIDI gap to next note (used for duration adjustment)
     var sustainPedalOn: Bool = false  // Whether sustain pedal should be active when this note plays
 
@@ -19,14 +18,12 @@ class TileNode: SKSpriteNode {
     weak var siblingTile: TileNode?
     var pairNotes: [[UInt8]]?             // [firstNotes, secondNotes] in musical order
     var pairDurations: [[TimeInterval]]?  // [firstDurations, secondDurations] individual durations per note
-    var pairInstruments: [[UInt8]]?       // [firstInstruments, secondInstruments] for multi-instrument chords
     var pairSustainStates: [Bool]?        // [firstSustain, secondSustain] sustain state for each tile in pair
     var isDoubleTilePair: Bool { return siblingTile != nil }
 
     // For long tiles: track which notes are currently being played (set when held)
     var currentlyPlayingNotes: [UInt8]?
     var currentlyPlayingDurations: [TimeInterval]?
-    var currentlyPlayingInstruments: [UInt8]?
 
     // Track the touch that is holding this tile (for multi-touch support)
     weak var holdingTouch: UITouch?
@@ -34,11 +31,6 @@ class TileNode: SKSpriteNode {
     /// Convenience for single note (backwards compatibility)
     var midiNote: UInt8 {
         return midiNotes.first ?? 60
-    }
-
-    /// Convenience for single instrument (backwards compatibility)
-    var instrument: UInt8 {
-        return instruments.first ?? 0
     }
 
     /// Convenience for max duration (backwards compatibility)
@@ -99,13 +91,12 @@ class TileNode: SKSpriteNode {
         return tileBottom + unitHeight
     }
 
-    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], instruments: [UInt8] = [0], gapToNextNote: TimeInterval = 0.5, sustainPedalOn: Bool = false) {
+    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], gapToNextNote: TimeInterval = 0.5, sustainPedalOn: Bool = false) {
         self.column = column
         self.tileLength = tileLength
         self.unitHeight = size.height
         self.midiNotes = midiNotes
         self.noteDurations = noteDurations
-        self.instruments = instruments
         self.gapToNextNote = gapToNextNote
         self.sustainPedalOn = sustainPedalOn
 
