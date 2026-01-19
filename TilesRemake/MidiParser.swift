@@ -220,6 +220,15 @@ class MidiParser {
             if eventType == kMusicEventType_MIDINoteMessage {
                 if let data = eventData {
                     let noteMessage = data.assumingMemoryBound(to: MIDINoteMessage.self)
+                    let channel = noteMessage.pointee.channel
+
+                    // Skip drum channel (channel 10 = index 9 in 0-indexed MIDI)
+                    if channel == 9 {
+                        MusicEventIteratorNextEvent(iter)
+                        MusicEventIteratorHasCurrentEvent(iter, &hasCurrentEvent)
+                        continue
+                    }
+
                     let midiNote = noteMessage.pointee.note
                     let durationInBeats = Double(noteMessage.pointee.duration)
 
