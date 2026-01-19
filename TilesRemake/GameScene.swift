@@ -1291,6 +1291,10 @@ class GameScene: SKScene {
         scoreLabel?.removeFromParent()
         scoreLabel = nil
 
+        // Remove song info bar (will be re-created in showStartScreen)
+        songInfoBar?.removeFromParent()
+        songInfoBar = nil
+
         // Go back to waiting state with Play tile
         gameState = .waiting
         showStartScreen()
