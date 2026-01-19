@@ -160,7 +160,10 @@ class SongListScene: SKScene {
         if searchQuery.isEmpty {
             filtered = songsWithDifficulty
         } else {
-            filtered = songsWithDifficulty.filter { $0.song.title.localizedCaseInsensitiveContains(searchQuery) }
+            filtered = songsWithDifficulty.filter {
+                $0.song.title.localizedCaseInsensitiveContains(searchQuery) ||
+                $0.song.category.localizedCaseInsensitiveContains(searchQuery)
+            }
         }
 
         // Sort by difficulty, then by name
@@ -234,7 +237,7 @@ class SongListScene: SKScene {
         }
 
         // Show message if no songs found
-        scrollContainer.childNode(withName: "noSongsLabel")?.removeFromParent()
+        childNode(withName: "noSongsLabel")?.removeFromParent()
         if filteredSongs.isEmpty {
             let noSongsLabel = SKLabelNode(text: searchQuery.isEmpty ? "No songs found" : "No matching songs")
             noSongsLabel.fontName = "Helvetica"
@@ -263,6 +266,7 @@ class SongListScene: SKScene {
         let cornerRadius: CGFloat = 10
         let padding: CGFloat = 20
         let songBoxWidth = size.width - padding * 2 - difficultyBoxWidth - 5  // 5pt gap between boxes
+        let songBoxLeftEdge = padding + difficultyBoxWidth + 15
 
         // Difficulty box (left side, same height as song box)
         let difficultyBox = SKShapeNode(rectOf: CGSize(width: difficultyBoxWidth, height: boxHeight), cornerRadius: cornerRadius)
@@ -290,43 +294,41 @@ class SongListScene: SKScene {
 
         // Get progress for this song
         let progress = ProgressManager.shared.getProgress(for: song.id)
-        let hasProgress = progress.highScore > 0 || progress.stars > 0 || progress.crowns > 0
+        let hasProgress = progress.stars > 0 || progress.crowns > 0
 
-        // Song title (inside song box) - positioned higher if we have progress to show
+        // Song title (top line)
         let titleLabel = SKLabelNode(text: song.title)
         titleLabel.fontName = "Helvetica"
         titleLabel.fontSize = 14
         titleLabel.fontColor = .black
         titleLabel.horizontalAlignmentMode = .left
         titleLabel.verticalAlignmentMode = .center
-        titleLabel.position = CGPoint(x: padding + difficultyBoxWidth + 20, y: hasProgress ? 10 : 0)
+        titleLabel.position = CGPoint(x: songBoxLeftEdge, y: hasProgress ? 16 : 8)
         container.addChild(titleLabel)
 
-        // Progress info (high score and stars/crowns)
+        // Category (middle line)
+        let categoryLabel = SKLabelNode(text: song.category)
+        categoryLabel.fontName = "Helvetica"
+        categoryLabel.fontSize = 11
+        categoryLabel.fontColor = .darkGray
+        categoryLabel.horizontalAlignmentMode = .left
+        categoryLabel.verticalAlignmentMode = .center
+        categoryLabel.position = CGPoint(x: songBoxLeftEdge, y: hasProgress ? 0 : -8)
+        container.addChild(categoryLabel)
+
+        // Stars/crowns (bottom line, only if has progress)
         if hasProgress {
-            let progressNode = SKNode()
-            progressNode.position = CGPoint(x: padding + difficultyBoxWidth + 20, y: -10)
-
-            // High score
-            let scoreLabel = SKLabelNode(text: "High Score: \(progress.highScore)")
-            scoreLabel.fontName = "Helvetica"
-            scoreLabel.fontSize = 11
-            scoreLabel.fontColor = .darkGray
-            scoreLabel.horizontalAlignmentMode = .left
-            scoreLabel.verticalAlignmentMode = .center
-            progressNode.addChild(scoreLabel)
-
-            // Stars or crowns (show crowns if any, otherwise show stars)
             let earnedCount = progress.crowns > 0 ? progress.crowns : progress.stars
             let filledSymbol = progress.crowns > 0 ? "crown.fill" : "star.fill"
             let outlineSymbol = progress.crowns > 0 ? "crown" : "star"
 
             let iconSpacing: CGFloat = 14
-            let scoreWidth: CGFloat = 100  // Approximate width of score text
             let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
             let iconSize = CGSize(width: 12, height: 12)
 
             // Show all 3 icons (filled for earned, outlined for remaining)
+            // Add half icon width to align left edge with text (sprites are center-anchored)
+            let iconStartX = songBoxLeftEdge + iconSize.width / 2
             for i in 0..<3 {
                 let isFilled = i < earnedCount
                 let symbolName = isFilled ? filledSymbol : outlineSymbol
@@ -334,12 +336,10 @@ class SongListScene: SKScene {
 
                 if let iconTexture = renderProgressIcon(symbolName: symbolName, color: color, size: iconSize) {
                     let iconNode = SKSpriteNode(texture: iconTexture)
-                    iconNode.position = CGPoint(x: scoreWidth + CGFloat(i) * iconSpacing, y: 0)
-                    progressNode.addChild(iconNode)
+                    iconNode.position = CGPoint(x: iconStartX + CGFloat(i) * iconSpacing, y: -16)
+                    container.addChild(iconNode)
                 }
             }
-
-            container.addChild(progressNode)
         }
 
         // Play button container (larger hit area) - positioned relative to container

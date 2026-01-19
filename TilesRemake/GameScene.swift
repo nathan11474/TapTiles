@@ -273,8 +273,8 @@ class GameScene: SKScene {
             bar.addChild(musicIconNode)
         }
 
-        // Song title (formatted from URL, truncated if too long)
-        let songTitle = SongInfo.formatTitle(from: songId)
+        // Song title (use displayName from config if available, otherwise format from filename)
+        let songTitle = SongManager.shared.availableSongs.first(where: { $0.id == songId })?.title ?? SongInfo.formatTitle(from: songId)
         let titleLabel = SKLabelNode(text: songTitle)
         titleLabel.fontName = "Helvetica"
         titleLabel.fontSize = 22

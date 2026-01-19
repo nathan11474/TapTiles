@@ -78,9 +78,11 @@ class SongManager {
                 for url in urls {
                     let songId = url.deletingPathExtension().lastPathComponent
                     let settings = songSettings[songId]
+                    let displayName = settings?.displayName
                     let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
                     let startFromNote = settings?.startFromNote
-                    availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
+                    let category = settings?.category ?? "Uncategorized"
+                    availableSongs.append(SongInfo(url: url, displayName: displayName, customSpeed: customSpeed, startFromNote: startFromNote, category: category))
                 }
             }
         }
@@ -92,9 +94,11 @@ class SongManager {
                     for url in urls {
                         let songId = url.deletingPathExtension().lastPathComponent
                         let settings = songSettings[songId]
+                        let displayName = settings?.displayName
                         let customSpeed = settings?.initialSpeed.map { CGFloat($0) }
                         let startFromNote = settings?.startFromNote
-                        availableSongs.append(SongInfo(url: url, customSpeed: customSpeed, startFromNote: startFromNote))
+                        let category = settings?.category ?? "Uncategorized"
+                        availableSongs.append(SongInfo(url: url, displayName: displayName, customSpeed: customSpeed, startFromNote: startFromNote, category: category))
                     }
                 }
             }
@@ -106,17 +110,14 @@ class SongManager {
         print("SongManager: Found \(availableSongs.count) song(s)")
         for song in availableSongs {
             var extras: [String] = []
+            extras.append("category: \(song.category)")
             if let speed = song.customSpeed {
                 extras.append("speed: \(Int(speed))")
             }
             if let startNote = song.startFromNote {
                 extras.append("startFromNote: \(startNote)")
             }
-            if extras.isEmpty {
-                print("  - \(song.title) (\(song.id))")
-            } else {
-                print("  - \(song.title) (\(song.id)) [\(extras.joined(separator: ", "))]")
-            }
+            print("  - \(song.title) (\(song.id)) [\(extras.joined(separator: ", "))]")
         }
     }
 }

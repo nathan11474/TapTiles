@@ -1,11 +1,111 @@
 {
+    "twinkle-twinkle-little-star": {
+        "category": "Traditional"
+    },
+    "moonlight-sonata-1st-movement": {
+        "displayName": "Moonlight Sonata (1st Movement)",
+        "category": "Beethoven"
+    },
+    "moonlight-sonata-3rd-movement": {
+        "displayName": "Moonlight Sonata (3rd Movement)",
+        "category": "Beethoven"
+    },
+    "fur-elise": {
+        "displayName": "Für Elise",
+        "category": "Beethoven"
+    },
     "the-flight-of-the-bumble-bee": {
-        "initialSpeed": 1700
+        "displayName": "Flight of the Bumblebee",
+        "initialSpeed": 1700,
+        "category": "Rimsky-Korsakov"
+    },
+    "dance-of-the-sugar-plum-fairy": {
+        "category": "Tchaikovsky"
+    },
+    "funeral-march": {
+        "category": "Chopin"
+    },
+    "winter-wind": {
+        "displayName": "Winter Wind",
+        "category": "Chopin"
     },
     "fantasie-impromptu": {
-        "initialSpeed": 1700
+        "displayName": "Fantaisie-Impromptu",
+        "initialSpeed": 1700,
+        "category": "Chopin"
+    },
+    "clair-de-lune": {
+        "category": "Debussy"
+    },
+    "minuet-in-g": {
+        "displayName": "Minuet in G Major",
+        "category": "Bach"
+    },
+    "turkish-march": {
+        "displayName": "Turkish March",
+        "category": "Mozart"
+    },
+    "la-campanella": {
+        "category": "Liszt"
+    },
+    "hungarian-rhapsody": {
+        "displayName": "Hungarian Rhapsody No. 2",
+        "category": "Liszt"
+    },
+    "mazeppa": {
+        "displayName": "Mazeppa",
+        "category": "Liszt"
+    },
+    "feux-follets": {
+        "displayName": "Feux Follets",
+        "category": "Liszt"
+    },
+    "liebestraum-no-3": {
+        "displayName": "Liebesträum No. 3",
+        "category": "Liszt"
+    },
+    "morceaux-de-fantasie": {
+        "displayName": "Morceaux de Fantaisie, Op. 3",
+        "category": "Rachmaninoff"
+    },
+    "rachmaninoff-op-18-no-2-in-c-minor": {
+        "displayName": "Piano Concerto No. 2 in C Minor",
+        "category": "Rachmaninoff"
+    },
+    "winter": {
+        "displayName": "Winter (Four Seasons)",
+        "startFromNote": 200,
+        "category": "Vivaldi"
+    },
+    "rush-e": {
+        "displayName": "Rush E",
+        "category": "Memes"
+    },
+    "song-of-storms": {
+        "category": "Video Games"
+    },
+    "tetris-main-theme": {
+        "category": "Video Games"
+    },
+    "merry-go-round-of-life": {
+        "displayName": "Merry-Go-Round of Life",
+        "category": "Studio Ghibli"
     },
     "stay-alive": {
-        "initialSpeed": 900
+        "displayName": "Stay Alive",
+        "initialSpeed": 900,
+        "category": "Anime"
     },
+    "realize": {
+        "displayName": "Realize",
+        "category": "Anime"
+    },
+    "memento": {
+        "displayName": "Memento",
+        "category": "Anime"
+    },
+    "if-i-am-with-you": {
+        "displayName": "If I Am With You",
+        "category": "Anime"
+    }
 }
