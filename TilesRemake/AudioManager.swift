@@ -24,10 +24,13 @@ class AudioManager {
     private var extraSamplers: [UInt8: AVAudioUnitSampler] = [:]
     private var soundFontURL: URL?
 
+    // Sustain pedal state (CC64)
+    private var sustainPedalOn: Bool = false
+
     // Track last note per instrument for overlap prevention on sustained instruments
     private var lastNotePerInstrument: [UInt8: (note: UInt8, startTime: Date)] = [:]
 
-    // Adaptive timing thresholds for note transitions
+    // Adaptive timing thresholds for note transitions (sustained instruments only)
     private let veryFastThreshold: TimeInterval = 0.1    // < 100ms: Allow natural overlap
     private let consecutiveThreshold: TimeInterval = 0.3  // 100-300ms: Use micro-overlap
     private let microOverlapDuration: TimeInterval = 0.035 // 35ms overlap for smooth transitions
@@ -189,11 +192,14 @@ class AudioManager {
         return sampler
     }
 
+    // MARK: - Sustained Instrument Handling
+
     /// Get the release buffer for an instrument based on its type
     /// Sustained instruments (winds, strings, etc.) need extra time to fade naturally
+    /// Piano and other decay instruments return 0 (they use sustain pedal instead)
     private func releaseBuffer(for instrument: UInt8) -> TimeInterval {
         switch instrument {
-        case 0...7:     // Pianos - natural decay
+        case 0...7:     // Pianos - use sustain pedal, no release buffer
             return 0
         case 8...15:    // Chromatic Percussion - natural decay
             return 0
@@ -228,12 +234,7 @@ class AudioManager {
         }
     }
 
-    /// Get the maximum release buffer for a set of instruments
-    func maxReleaseBuffer(for instruments: [UInt8]) -> TimeInterval {
-        return instruments.map { releaseBuffer(for: $0) }.max() ?? 0
-    }
-
-    /// Check if an instrument is sustained (needs overlap prevention)
+    /// Check if an instrument is sustained (needs overlap prevention and release buffer)
     private func isSustainedInstrument(_ instrument: UInt8) -> Bool {
         return releaseBuffer(for: instrument) > 0
     }
@@ -249,17 +250,13 @@ class AudioManager {
         let elapsed = Date().timeIntervalSince(lastNote.startTime)
 
         if elapsed < veryFastThreshold {
-            // Very fast passage: Allow natural overlap
-            // Don't stop the previous note - let its scheduled stop happen naturally
-            // This creates a natural legato sound
+            // Very fast passage: Allow natural overlap for legato sound
             return
         } else if elapsed < consecutiveThreshold {
             // Normal passage: Use micro-overlap for smooth transition
-            // Cancel the previous note's scheduled stop
             _ = incrementGeneration(for: lastNote.note, instrument: instrument)
 
             // Schedule stop of previous note after a micro-overlap delay
-            // This creates a brief crossfade effect
             let previousNote = lastNote.note
             let targetSampler = getSampler(for: instrument)
             DispatchQueue.main.asyncAfter(deadline: .now() + microOverlapDuration) {
@@ -276,28 +273,75 @@ class AudioManager {
         }
     }
 
+    // MARK: - Sustain Pedal Control
+
+    /// Set sustain pedal state (sends CC64 to all samplers)
+    /// Value >= 64 = ON, < 64 = OFF
+    func setSustainPedal(on: Bool) {
+        guard on != sustainPedalOn else { return }  // No change needed
+        sustainPedalOn = on
+
+        let value: UInt8 = on ? 127 : 0
+
+        // Send CC64 to main sampler and all extra samplers
+        sampler.sendController(64, withValue: value, onChannel: 0)
+        for (_, extraSampler) in extraSamplers {
+            extraSampler.sendController(64, withValue: value, onChannel: 0)
+        }
+    }
+
+    /// Prepare sustain pedal for a note - clears sustain if the note should have pedal off
+    /// This ensures held notes are released before playing notes without sustain
+    func prepareSustainPedal(for sustainOn: Bool) {
+        if sustainOn {
+            // Turn pedal on if needed
+            setSustainPedal(on: true)
+        } else {
+            // Always send pedal-off when note requires no sustain
+            // This ensures any ringing notes are released, even if we think pedal is already off
+            sustainPedalOn = false
+            sampler.sendController(64, withValue: 0, onChannel: 0)
+            for (_, extraSampler) in extraSamplers {
+                extraSampler.sendController(64, withValue: 0, onChannel: 0)
+            }
+        }
+    }
+
+    /// Get current sustain pedal state
+    var isSustainPedalOn: Bool {
+        return sustainPedalOn
+    }
+
+    // MARK: - Note Playback
+
     func playSustainedNote(_ note: UInt8, velocity: UInt8 = 127, instrument: UInt8 = 0) {
-        // For sustained instruments, stop any recent note to prevent overlap
-        stopPreviousNoteIfConsecutive(instrument: instrument)
+        // For sustained instruments, handle overlap prevention
+        if isSustainedInstrument(instrument) {
+            stopPreviousNoteIfConsecutive(instrument: instrument)
+        }
 
         _ = incrementGeneration(for: note, instrument: instrument)
         getSampler(for: instrument).startNote(note, withVelocity: velocity, onChannel: 0)
 
-        // Record this note for overlap prevention
+        // Record this note for overlap prevention (sustained instruments only)
         recordNoteStart(note: note, instrument: instrument)
     }
 
     func playShortNote(_ note: UInt8, velocity: UInt8 = 100, duration: TimeInterval = 0.5, instrument: UInt8 = 0) {
-        // For sustained instruments, stop any recent note to prevent overlap
-        stopPreviousNoteIfConsecutive(instrument: instrument)
+        // For sustained instruments, handle overlap prevention
+        if isSustainedInstrument(instrument) {
+            stopPreviousNoteIfConsecutive(instrument: instrument)
+        }
 
         let generation = incrementGeneration(for: note, instrument: instrument)
         let targetSampler = getSampler(for: instrument)
-        let totalDuration = duration + releaseBuffer(for: instrument)
         targetSampler.startNote(note, withVelocity: velocity, onChannel: 0)
 
-        // Record this note for overlap prevention
+        // Record this note for overlap prevention (sustained instruments only)
         recordNoteStart(note: note, instrument: instrument)
+
+        // Add release buffer for sustained instruments to allow natural fade
+        let totalDuration = duration + releaseBuffer(for: instrument)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + totalDuration) { [weak self] in
             guard let self = self, self.getGeneration(for: note, instrument: instrument) == generation else { return }
@@ -362,14 +406,15 @@ class AudioManager {
     }
 
     func stopNotesAfterDelay(_ notes: [UInt8], delay: TimeInterval, instruments: [UInt8] = [0]) {
-        for (index, note) in notes.enumerated() {
-            let instrument = index < instruments.count ? instruments[index] : (instruments.last ?? 0)
-            let totalDelay = delay + releaseBuffer(for: instrument)
-            stopNoteAfterDelay(note, delay: totalDelay)
+        for note in notes {
+            stopNoteAfterDelay(note, delay: delay)
         }
     }
 
     func stopAllNotes() {
+        // Reset sustain pedal
+        setSustainPedal(on: false)
+
         noteGenerations.removeAll()
         for note: UInt8 in 0...127 {
             sampler.stopNote(note, onChannel: 0)

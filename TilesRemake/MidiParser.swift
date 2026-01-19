@@ -12,11 +12,13 @@ struct NoteEvent {
     let noteDurations: [TimeInterval] // Individual note durations from MIDI (parallel array with midiNotes)
     let midiNotes: [UInt8]           // MIDI note numbers 0-127 (multiple = chord)
     let instruments: [UInt8]         // MIDI program numbers 0-127 (parallel array with midiNotes)
+    let sustainPedalOn: Bool         // Whether sustain pedal should be active when this note plays
 
     // For double-tile rows (fast sections): second tile's notes
     let secondTileMidiNotes: [UInt8]?
     let secondTileNoteDurations: [TimeInterval]?
     let secondTileInstruments: [UInt8]?
+    let secondTileSustainPedalOn: Bool?
 
     /// Convenience for single note
     var midiNote: UInt8 {
@@ -92,19 +94,24 @@ class MidiParser {
         MusicSequenceGetTrackCount(seq, &trackCount)
         print("MidiParser: Found \(trackCount) tracks")
 
-        // Collect all notes from all tracks
+        // Collect all notes and sustain events from all tracks
         var allNotes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] = []
+        var allSustainEvents: [(time: TimeInterval, value: UInt8)] = []
 
         for i in 0..<trackCount {
             var track: MusicTrack?
             MusicSequenceGetIndTrack(seq, i, &track)
 
             if let track = track {
-                let trackNotes = parseTrack(track, tempo: tempo)
+                let trackNotes = parseTrack(track, tempo: tempo, sustainEvents: &allSustainEvents)
                 allNotes.append(contentsOf: trackNotes)
                 print("MidiParser: Track \(i) has \(trackNotes.count) notes")
             }
         }
+
+        // Sort sustain events by time
+        allSustainEvents.sort { $0.time < $1.time }
+        print("MidiParser: Found \(allSustainEvents.count) sustain pedal events")
 
         // Sort by time
         allNotes.sort { $0.time < $1.time }
@@ -118,8 +125,8 @@ class MidiParser {
         // Calculate song end time (last note time + some buffer)
         let songEnd = allNotes.last!.time + 2.0
 
-        // Calculate durations (gap to next note)
-        let noteEvents = calculateDurations(notes: allNotes, songEnd: songEnd)
+        // Calculate durations (gap to next note) and assign sustain state
+        let noteEvents = calculateDurations(notes: allNotes, songEnd: songEnd, sustainEvents: allSustainEvents)
 
         // Calculate trimmed mean gap (remove top 10% outliers, then average)
         // This captures the typical gap while ignoring unusually long pauses
@@ -212,8 +219,8 @@ class MidiParser {
         return 120.0  // Default tempo if none found
     }
 
-    // Parse a single track, extracting note events with their durations and instruments
-    private func parseTrack(_ track: MusicTrack, tempo: Double) -> [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] {
+    // Parse a single track, extracting note events with their durations, instruments, and sustain state
+    private func parseTrack(_ track: MusicTrack, tempo: Double, sustainEvents: inout [(time: TimeInterval, value: UInt8)]) -> [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] {
         var notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)] = []
 
         // First pass: collect program changes (instrument assignments) by channel
@@ -253,6 +260,18 @@ class MidiParser {
                     if statusType == 0xC0 {
                         let program = channelMessage.pointee.data1
                         programChanges.append((time: timestamp, channel: channel, program: program))
+                    }
+
+                    // Control Change message (0xB0-0xBF)
+                    if statusType == 0xB0 {
+                        let controller = channelMessage.pointee.data1
+                        let value = channelMessage.pointee.data2
+
+                        // CC64 = Sustain Pedal (Damper)
+                        if controller == 64 {
+                            let timeInSeconds = (timestamp / tempo) * 60.0
+                            sustainEvents.append((time: timeInSeconds, value: value))
+                        }
                     }
                 }
             }
@@ -317,11 +336,22 @@ class MidiParser {
 
     // Group notes into chords and calculate gaps
     // Notes within chordTolerance seconds of each other are considered simultaneous (a chord)
-    private func calculateDurations(notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)], songEnd: TimeInterval) -> [NoteEvent] {
+    private func calculateDurations(notes: [(time: TimeInterval, noteDuration: TimeInterval, midiNote: UInt8, instrument: UInt8)], songEnd: TimeInterval, sustainEvents: [(time: TimeInterval, value: UInt8)]) -> [NoteEvent] {
         guard !notes.isEmpty else { return [] }
 
         // Tolerance for considering notes as simultaneous (in seconds)
         let chordTolerance: TimeInterval = 0.02
+
+        // Helper: determine if sustain pedal is on at a given time
+        // Sustain is ON when value >= 64, OFF when < 64
+        func isSustainOn(at time: TimeInterval) -> Bool {
+            var sustainOn = false
+            for event in sustainEvents {
+                if event.time > time { break }
+                sustainOn = event.value >= 64
+            }
+            return sustainOn
+        }
 
         // Group notes into chords based on timing
         // Stores individual durations per note (parallel arrays)
@@ -372,15 +402,20 @@ class MidiParser {
                 gapToNext = max(songEnd - group.time, 1.0)
             }
 
+            // Determine sustain pedal state at this note's time
+            let sustainOn = isSustainOn(at: group.time)
+
             noteEvents.append(NoteEvent(
                 time: group.time,
                 gapToNextNote: gapToNext,
                 noteDurations: group.durations,
                 midiNotes: group.midiNotes,
                 instruments: group.instruments,
+                sustainPedalOn: sustainOn,
                 secondTileMidiNotes: nil,
                 secondTileNoteDurations: nil,
-                secondTileInstruments: nil
+                secondTileInstruments: nil,
+                secondTileSustainPedalOn: nil
             ))
         }
 
@@ -421,9 +456,11 @@ class MidiParser {
                     noteDurations: current.noteDurations,
                     midiNotes: current.midiNotes,
                     instruments: current.instruments,
+                    sustainPedalOn: current.sustainPedalOn,
                     secondTileMidiNotes: next.midiNotes,
                     secondTileNoteDurations: next.noteDurations,
-                    secondTileInstruments: next.instruments
+                    secondTileInstruments: next.instruments,
+                    secondTileSustainPedalOn: next.sustainPedalOn
                 )
                 result.append(merged)
 

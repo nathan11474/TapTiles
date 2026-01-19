@@ -13,12 +13,14 @@ class TileNode: SKSpriteNode {
     var noteDurations: [TimeInterval] = [0.5]  // Individual durations per note (parallel array with midiNotes)
     var instruments: [UInt8] = [0]  // General MIDI instruments (parallel array with midiNotes)
     var gapToNextNote: TimeInterval = 0.5  // MIDI gap to next note (used for duration adjustment)
+    var sustainPedalOn: Bool = false  // Whether sustain pedal should be active when this note plays
 
     // Double tile pairing - tiles share a note queue, first tap plays first note regardless of which tile
     weak var siblingTile: TileNode?
     var pairNotes: [[UInt8]]?             // [firstNotes, secondNotes] in musical order
     var pairDurations: [[TimeInterval]]?  // [firstDurations, secondDurations] individual durations per note
     var pairInstruments: [[UInt8]]?       // [firstInstruments, secondInstruments] for multi-instrument chords
+    var pairSustainStates: [Bool]?        // [firstSustain, secondSustain] sustain state for each tile in pair
     var isDoubleTilePair: Bool { return siblingTile != nil }
 
     // For long tiles: track which notes are currently being played (set when held)
@@ -97,7 +99,7 @@ class TileNode: SKSpriteNode {
         return tileBottom + unitHeight
     }
 
-    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], instruments: [UInt8] = [0], gapToNextNote: TimeInterval = 0.5) {
+    init(column: Int, size: CGSize, tileLength: Int = 1, midiNotes: [UInt8] = [60], noteDurations: [TimeInterval] = [0.5], instruments: [UInt8] = [0], gapToNextNote: TimeInterval = 0.5, sustainPedalOn: Bool = false) {
         self.column = column
         self.tileLength = tileLength
         self.unitHeight = size.height
@@ -105,6 +107,7 @@ class TileNode: SKSpriteNode {
         self.noteDurations = noteDurations
         self.instruments = instruments
         self.gapToNextNote = gapToNextNote
+        self.sustainPedalOn = sustainPedalOn
 
         // Calculate actual size based on tile length
         let actualHeight = size.height * CGFloat(tileLength)
