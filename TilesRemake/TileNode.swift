@@ -64,10 +64,9 @@ class TileNode: SKSpriteNode {
     // Segment sprites for long tiles (bottom to top) - kept for compatibility
     private var segments: [SKSpriteNode] = []
 
-    // Fill nodes for long tile hold animation (split for performance - avoids SKShapeNode recreation every frame)
-    private var fillRectNode: SKSpriteNode?  // Rectangle body - resized each frame (cheap)
-    private var fillCapNode: SKShapeNode?    // Oval cap - repositioned each frame (cheap)
-    private var fillCropNode: SKCropNode?
+    // Fill nodes for long tile hold animation
+    private var fillRectNode: SKSpriteNode?  // Rectangle body - scaled each frame
+    private var fillCapNode: SKShapeNode?    // Oval cap - repositioned each frame
 
     // Expanded frame for hit detection
     var hitboxFrame: CGRect {
@@ -154,21 +153,12 @@ class TileNode: SKSpriteNode {
         // Add circle and line decoration
         addLongTileDecoration()
 
-        // Create the fill shape (starts empty, will grow from bottom)
-        // Use a crop node to clip the fill to the tile bounds
-        let cropNode = SKCropNode()
-        cropNode.zPosition = 5  // Above border so fill covers it
-
-        // Mask is slightly larger than tile so fill covers the border
-        let maskSize = CGSize(width: self.size.width + 4, height: self.size.height + 4)
-        let maskNode = SKSpriteNode(color: .white, size: maskSize)
-        cropNode.maskNode = maskNode
-
-        // Create the fill shape - starts with zero height
-        updateFillShape(height: 0, in: cropNode)
-
-        addChild(cropNode)
-        fillCropNode = cropNode
+        // Create container for fill nodes (no crop node - we handle bounds manually)
+        // This avoids SpriteKit rendering issues with crop nodes and large/scaled content
+        let fillContainer = SKNode()
+        fillContainer.zPosition = 5  // Above border so fill covers it
+        fillContainer.name = "fillContainer"
+        addChild(fillContainer)
 
         // Create placeholder segments for compatibility with existing logic
         let segmentSize = CGSize(width: size.width, height: size.height)
@@ -226,7 +216,10 @@ class TileNode: SKSpriteNode {
     // Increase this value to make fill spawn higher and complete earlier
     static let fillSpawnOffset: CGFloat = 100
 
-    private func updateFillShape(height: CGFloat, in cropNode: SKCropNode) {
+    private func updateFillShape(height: CGFloat) {
+        // Get the fill container
+        guard let fillContainer = childNode(withName: "fillContainer") else { return }
+
         guard height > 0 else {
             // Remove fill nodes when height is zero
             fillRectNode?.removeFromParent()
@@ -245,18 +238,30 @@ class TileNode: SKSpriteNode {
         let bottomY = -tileHeight / 2 - 1
         let leftX = -tileWidth / 2 - 1
         let rightX = tileWidth / 2 + 1
+        let topY = tileHeight / 2 + 1  // Top boundary
 
         // Height of the rectangular portion (below the oval cap)
-        let rectHeight = max(0, height - ovalHeight + 1)
+        // Cap at tile height so we don't extend beyond the tile visually
+        let rawRectHeight = max(0, height - ovalHeight + 1)
+        let rectHeight = min(rawRectHeight, tileHeight + 2)  // Don't exceed tile bounds
+
+        // Cap Y position - don't let it go above the tile top
+        let rawCapY = bottomY + rawRectHeight
+        let capY = min(rawCapY, topY)
+
+        // Hide the cap when it would be above the tile (fill is complete)
+        let capShouldBeVisible = rawCapY <= topY + ovalHeight
 
         // Create nodes once, then just update properties
         if fillRectNode == nil {
             // Create the rectangular fill body (anchored at bottom center)
-            let rect = SKSpriteNode(color: TileNode.longTileFillColor, size: CGSize(width: rectWidth, height: 1))
+            // Use a base height and scale it, rather than resizing directly
+            let baseHeight: CGFloat = 100  // Base height that gets scaled
+            let rect = SKSpriteNode(color: TileNode.longTileFillColor, size: CGSize(width: rectWidth, height: baseHeight))
             rect.anchorPoint = CGPoint(x: 0.5, y: 0)
             rect.position = CGPoint(x: 0, y: bottomY)
             rect.zPosition = 1
-            cropNode.addChild(rect)
+            fillContainer.addChild(rect)
             fillRectNode = rect
         }
 
@@ -272,16 +277,18 @@ class TileNode: SKSpriteNode {
             let cap = SKShapeNode(path: capPath)
             cap.fillColor = TileNode.longTileFillColor
             cap.strokeColor = .clear
-            cap.zPosition = 1
-            cropNode.addChild(cap)
+            cap.zPosition = 2  // Above the rect
+            fillContainer.addChild(cap)
             fillCapNode = cap
         }
 
-        // Update rectangle height (cheap operation)
-        fillRectNode?.size.height = rectHeight
+        // Update rectangle height using scale
+        let baseHeight: CGFloat = 100
+        fillRectNode?.yScale = rectHeight / baseHeight
 
-        // Update cap position to sit on top of rectangle (cheap operation)
-        fillCapNode?.position.y = bottomY + rectHeight
+        // Update cap position and visibility
+        fillCapNode?.position.y = capY
+        fillCapNode?.isHidden = !capShouldBeVisible
     }
 
     required init?(coder aDecoder: NSCoder) {
@@ -310,9 +317,7 @@ class TileNode: SKSpriteNode {
         // Clamp to a small minimum (so something is visible), no max clamp
         fillHeight = max(10, initialFillHeight)
 
-        if let cropNode = fillCropNode {
-            updateFillShape(height: fillHeight, in: cropNode)
-        }
+        updateFillShape(height: fillHeight)
         completedSegments = 1
     }
 
@@ -332,16 +337,13 @@ class TileNode: SKSpriteNode {
         // Add spawn offset to make fill spawn higher and complete earlier
         let targetFillHeight = fingerY - tileBottom + TileNode.ovalHeight + TileNode.fillSpawnOffset
 
-        // Don't clamp - let fill height exceed tile height so curve scrolls past naturally
-        // The crop mask will handle visual clipping
+        // Let fill height exceed tile height so completion logic works correctly
         let newFillHeight = max(0, targetFillHeight)
 
         // Update fill if it has grown
         if newFillHeight > fillHeight {
             fillHeight = newFillHeight
-            if let cropNode = fillCropNode {
-                updateFillShape(height: fillHeight, in: cropNode)
-            }
+            updateFillShape(height: fillHeight)
         }
 
         // Calculate completed segments based on fill height
@@ -374,13 +376,12 @@ class TileNode: SKSpriteNode {
         if isLongTile {
             // Make the background transparent
             self.color = TileNode.completedSegmentColor
-            // Remove fill nodes and crop node
+            // Remove fill nodes and fill container
             fillRectNode?.removeFromParent()
             fillRectNode = nil
             fillCapNode?.removeFromParent()
             fillCapNode = nil
-            fillCropNode?.removeFromParent()
-            fillCropNode = nil
+            childNode(withName: "fillContainer")?.removeFromParent()
             // Remove any remaining children (like border)
             self.children.forEach { $0.removeFromParent() }
         } else {
@@ -396,13 +397,12 @@ class TileNode: SKSpriteNode {
         // Set background to light gray (matching completed normal tiles)
         self.color = .lightGray
 
-        // Remove the fill nodes and crop node
+        // Remove the fill nodes and fill container
         fillRectNode?.removeFromParent()
         fillRectNode = nil
         fillCapNode?.removeFromParent()
         fillCapNode = nil
-        fillCropNode?.removeFromParent()
-        fillCropNode = nil
+        childNode(withName: "fillContainer")?.removeFromParent()
 
         // Hide the border and decorations
         for child in children {
