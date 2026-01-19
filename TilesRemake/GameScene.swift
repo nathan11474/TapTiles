@@ -1359,17 +1359,29 @@ class GameScene: SKScene {
         // Handle double tile spawning with special column constraints
         if note.isDoubleTile, let secondNotes = note.secondTileMidiNotes {
             // Double tiles spawn either on edges (0,3) or middle (1,2)
-            // Must avoid columns used by topmost tiles
+            // Must avoid columns used by topmost tiles (including Play tile)
             let useEdges: Bool
-            if topmostColumns.isEmpty {
-                // No previous tiles - pick randomly
-                useEdges = Bool.random()
-            } else if topmostColumns.contains(0) || topmostColumns.contains(3) {
-                // Previous tile(s) on edge - use middle
-                useEdges = false
+            if !topmostColumns.isEmpty {
+                // Check topmost tiles
+                if topmostColumns.contains(0) || topmostColumns.contains(3) {
+                    // Previous tile(s) on edge - use middle
+                    useEdges = false
+                } else {
+                    // Previous tile(s) in middle - use edges
+                    useEdges = true
+                }
+            } else if let playTileColumn = playTile?.column {
+                // No spawned tiles yet, but Play tile exists - avoid its column
+                if playTileColumn == 0 || playTileColumn == 3 {
+                    // Play tile on edge - use middle
+                    useEdges = false
+                } else {
+                    // Play tile in middle - use edges
+                    useEdges = true
+                }
             } else {
-                // Previous tile(s) in middle - use edges
-                useEdges = true
+                // No previous tiles at all - pick randomly
+                useEdges = Bool.random()
             }
 
             let columns = useEdges ? GameScene.edgeColumns : GameScene.middleColumns
