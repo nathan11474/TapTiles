@@ -25,8 +25,14 @@ class GameScene: SKScene {
     private let startFromNote: Int?    // Optional note index to start from
 
     /// Song identifier for progress tracking
+    /// Imported songs get prefixed with "imported_" to avoid ID collisions with bundled songs
     private var songId: String {
-        return songURL.deletingPathExtension().lastPathComponent
+        let baseId = songURL.deletingPathExtension().lastPathComponent
+        // Check if this is an imported song by seeing if the URL is in the ImportedSongs directory
+        if songURL.path.contains("/ImportedSongs/") {
+            return ImportedSongManager.importedIdPrefix + baseId
+        }
+        return baseId
     }
 
     // MARK: - Initializers
@@ -278,7 +284,11 @@ class GameScene: SKScene {
         }
 
         // Song title (use displayName from config if available, otherwise format from filename)
-        let songTitle = SongManager.shared.availableSongs.first(where: { $0.id == songId })?.title ?? SongInfo.formatTitle(from: songId)
+        // Check both bundled songs and imported songs
+        let baseId = songURL.deletingPathExtension().lastPathComponent
+        let songTitle = SongManager.shared.availableSongs.first(where: { $0.id == songId })?.title
+            ?? ImportedSongManager.shared.availableImportedSongs.first(where: { $0.id == songId })?.title
+            ?? SongInfo.formatTitle(from: baseId)
         let titleLabel = SKLabelNode(text: songTitle)
         titleLabel.fontName = "Helvetica"
         titleLabel.fontSize = 22

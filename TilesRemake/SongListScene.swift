@@ -50,6 +50,9 @@ class SongListScene: SKScene {
     // Favorite buttons
     private var favoriteButtons: [(button: SKNode, song: SongInfo)] = []
 
+    // Import button (shown on Imports tab)
+    private var importButton: SKNode?
+
     // Cache for heart icon textures
     private static var cachedHeartIcons: [String: SKTexture] = [:]
 
@@ -175,6 +178,58 @@ class SongListScene: SKScene {
             tabNodes[tab] = tabContainer
             tabUnderlines[tab] = underline
         }
+
+        // Setup import button (initially hidden, shown only on Imports tab)
+        setupImportButton()
+    }
+
+    private func setupImportButton() {
+        let buttonContainer = SKNode()
+        buttonContainer.position = CGPoint(x: size.width - 50, y: size.height - 60)
+        buttonContainer.zPosition = 101
+        buttonContainer.name = "importButton"
+        buttonContainer.alpha = 0  // Hidden by default
+
+        // Button background (circle)
+        let circleSize: CGFloat = 36
+        let circle = SKShapeNode(circleOfRadius: circleSize / 2)
+        circle.fillColor = UIColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 1.0)
+        circle.strokeColor = .clear
+        buttonContainer.addChild(circle)
+
+        // Plus icon
+        let iconSize = CGSize(width: 20, height: 20)
+        if let iconTexture = renderImportIcon(symbolName: "plus", color: .white, size: iconSize) {
+            let iconNode = SKSpriteNode(texture: iconTexture)
+            buttonContainer.addChild(iconNode)
+        }
+
+        addChild(buttonContainer)
+        importButton = buttonContainer
+    }
+
+    /// Renders an SF Symbol as a texture for the import button
+    private func renderImportIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {
+        let config = UIImage.SymbolConfiguration(pointSize: size.height, weight: .bold)
+        guard let symbolImage = UIImage(systemName: symbolName, withConfiguration: config) else {
+            return nil
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            color.setFill()
+            let symbolSize = symbolImage.size
+            let scale = min(size.width / symbolSize.width, size.height / symbolSize.height)
+            let scaledWidth = symbolSize.width * scale
+            let scaledHeight = symbolSize.height * scale
+            let x = (size.width - scaledWidth) / 2
+            let y = (size.height - scaledHeight) / 2
+            let drawRect = CGRect(x: x, y: y, width: scaledWidth, height: scaledHeight)
+            symbolImage.draw(in: drawRect, blendMode: .normal, alpha: 1.0)
+            context.fill(CGRect(origin: .zero, size: size), blendMode: .sourceIn)
+        }
+
+        return SKTexture(image: image)
     }
 
     private func switchToTab(_ tab: Tab) {
@@ -192,6 +247,9 @@ class SongListScene: SKScene {
         currentTab = tab
         scrollOffset = 0
         scrollVelocity = 0
+
+        // Show/hide import button based on tab
+        importButton?.alpha = (tab == .imports) ? 1.0 : 0.0
 
         // Update content based on tab
         switch tab {
@@ -216,13 +274,22 @@ class SongListScene: SKScene {
     private func filterAndRebuildFavorites() {
         hideEmptyFavoritesMessage()
 
-        // Get all favorited songs with their difficulties
+        // Get all favorited bundled songs with their difficulties
         var favoriteSongs = songs.filter { song in
             ProgressManager.shared.isFavorite(for: song.id, fileURL: song.url)
         }.map { song -> (song: SongInfo, difficulty: Int) in
             let difficulty = SongManager.shared.getCachedDifficulty(for: song.id) ?? 3
             return (song: song, difficulty: difficulty)
         }
+
+        // Also include favorited imported songs
+        let favoriteImportedSongs = ImportedSongManager.shared.availableImportedSongs.filter { song in
+            ProgressManager.shared.isFavorite(for: song.id, fileURL: song.url)
+        }.map { song -> (song: SongInfo, difficulty: Int) in
+            let difficulty = SongManager.shared.getCachedDifficulty(for: song.id, fileURL: song.url) ?? calculateAndCacheDifficulty(for: song)
+            return (song: song, difficulty: difficulty)
+        }
+        favoriteSongs.append(contentsOf: favoriteImportedSongs)
 
         // Apply search filter if query is not empty
         if !searchQuery.isEmpty {
@@ -271,8 +338,28 @@ class SongListScene: SKScene {
     private func filterAndRebuildImports() {
         hideEmptyImportsMessage()
 
-        // TODO: Get imported songs when import feature is implemented
-        let importedSongs: [(song: SongInfo, difficulty: Int)] = []
+        // Get imported songs from ImportedSongManager
+        var importedSongs = ImportedSongManager.shared.availableImportedSongs.map { song -> (song: SongInfo, difficulty: Int) in
+            // Get cached difficulty or calculate it
+            let difficulty = SongManager.shared.getCachedDifficulty(for: song.id, fileURL: song.url) ?? calculateAndCacheDifficulty(for: song)
+            return (song: song, difficulty: difficulty)
+        }
+
+        // Apply search filter if query is not empty
+        if !searchQuery.isEmpty {
+            importedSongs = importedSongs.filter {
+                $0.song.title.localizedCaseInsensitiveContains(searchQuery) ||
+                $0.song.category.localizedCaseInsensitiveContains(searchQuery)
+            }
+        }
+
+        // Sort by difficulty, then by name
+        importedSongs.sort { lhs, rhs in
+            if lhs.difficulty != rhs.difficulty {
+                return lhs.difficulty < rhs.difficulty
+            }
+            return lhs.song.title < rhs.song.title
+        }
 
         filteredSongs = importedSongs
         rebuildSongList()
@@ -281,6 +368,13 @@ class SongListScene: SKScene {
         if importedSongs.isEmpty {
             showEmptyImportsMessage()
         }
+    }
+
+    /// Calculates and caches difficulty for a song (used for imported songs)
+    private func calculateAndCacheDifficulty(for song: SongInfo) -> Int {
+        let difficulty = calculateDifficulty(for: song)
+        SongManager.shared.cacheDifficulty(difficulty, for: song.id, fileURL: song.url)
+        return difficulty
     }
 
     private func showEmptyImportsMessage() {
@@ -698,6 +792,21 @@ class SongListScene: SKScene {
             }
         }
 
+        // Check import button (only visible on Imports tab)
+        if currentTab == .imports, let importBtn = importButton {
+            let hitAreaSize: CGFloat = 44
+            let hitRect = CGRect(
+                x: importBtn.position.x - hitAreaSize / 2,
+                y: importBtn.position.y - hitAreaSize / 2,
+                width: hitAreaSize,
+                height: hitAreaSize
+            )
+            if hitRect.contains(location) {
+                transitionToImport()
+                return
+            }
+        }
+
         // Check play buttons only (not the entire song row)
         for (button, song) in playButtons {
             // Convert scene location to the button's parent coordinate space
@@ -803,6 +912,15 @@ class SongListScene: SKScene {
         let gameScene = GameScene(size: size, songURL: song.url, customSpeed: song.customSpeed, startFromNote: song.startFromNote)
         gameScene.scaleMode = scaleMode
         view?.presentScene(gameScene)
+    }
+
+    private func transitionToImport() {
+        searchTextField?.removeFromSuperview()
+        searchTextField = nil
+
+        let importScene = ImportScene(size: size)
+        importScene.scaleMode = scaleMode
+        view?.presentScene(importScene)
     }
 
     private func toggleFavorite(for song: SongInfo, button: SKNode) {
