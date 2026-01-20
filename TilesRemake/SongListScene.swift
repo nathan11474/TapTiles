@@ -39,11 +39,13 @@ class SongListScene: SKScene {
     private enum Tab: String, CaseIterable {
         case songs = "Songs"
         case favorites = "Favorites"
+        case imports = "Imports"
     }
     private var currentTab: Tab = .songs
     private var tabNodes: [Tab: SKNode] = [:]
     private var tabUnderlines: [Tab: SKShapeNode] = [:]
     private var emptyFavoritesLabel: SKLabelNode?
+    private var emptyImportsLabel: SKLabelNode?
 
     // Favorite buttons
     private var favoriteButtons: [(button: SKNode, song: SongInfo)] = []
@@ -135,7 +137,7 @@ class SongListScene: SKScene {
     private func setupTabBar() {
         // Center tabs between back button (y: size.height - 60) and search bar (y: size.height - 125)
         let tabY = size.height - 92
-        let tabSpacing: CGFloat = 140
+        let tabSpacing: CGFloat = 110
         let totalWidth = tabSpacing * CGFloat(Tab.allCases.count - 1)
         let startX = (size.width - totalWidth) / 2
 
@@ -195,12 +197,19 @@ class SongListScene: SKScene {
         switch tab {
         case .songs:
             hideEmptyFavoritesMessage()
+            hideEmptyImportsMessage()
             searchTextField?.isHidden = false
             filterAndRebuildSongList()
         case .favorites:
             childNode(withName: "noSongsLabel")?.removeFromParent()
+            hideEmptyImportsMessage()
             searchTextField?.isHidden = false
             filterAndRebuildFavorites()
+        case .imports:
+            childNode(withName: "noSongsLabel")?.removeFromParent()
+            hideEmptyFavoritesMessage()
+            searchTextField?.isHidden = false
+            filterAndRebuildImports()
         }
     }
 
@@ -259,6 +268,40 @@ class SongListScene: SKScene {
         emptyFavoritesLabel = nil
     }
 
+    private func filterAndRebuildImports() {
+        hideEmptyImportsMessage()
+
+        // TODO: Get imported songs when import feature is implemented
+        let importedSongs: [(song: SongInfo, difficulty: Int)] = []
+
+        filteredSongs = importedSongs
+        rebuildSongList()
+
+        // Show empty message if no imports
+        if importedSongs.isEmpty {
+            showEmptyImportsMessage()
+        }
+    }
+
+    private func showEmptyImportsMessage() {
+        guard emptyImportsLabel == nil else { return }
+
+        let message = searchQuery.isEmpty ? "No imports yet" : "No matching imports"
+        let label = SKLabelNode(text: message)
+        label.fontName = "Helvetica"
+        label.fontSize = 24
+        label.fontColor = .gray
+        label.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        label.name = "emptyImportsLabel"
+        addChild(label)
+        emptyImportsLabel = label
+    }
+
+    private func hideEmptyImportsMessage() {
+        emptyImportsLabel?.removeFromParent()
+        emptyImportsLabel = nil
+    }
+
     private func setupSearchBar(in view: SKView) {
         let searchBarHeight: CGFloat = 40
         let searchBarY: CGFloat = 125  // Below header
@@ -298,6 +341,8 @@ class SongListScene: SKScene {
                 self.filterAndRebuildSongList()
             case .favorites:
                 self.filterAndRebuildFavorites()
+            case .imports:
+                self.filterAndRebuildImports()
             }
         }
     }
