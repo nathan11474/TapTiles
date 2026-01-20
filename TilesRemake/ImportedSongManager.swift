@@ -164,10 +164,13 @@ class ImportedSongManager {
     // MARK: - Import Operations
 
     /// Imports a MIDI file from a source URL
-    /// - Parameter sourceURL: The URL to the MIDI file (typically from document picker)
+    /// - Parameters:
+    ///   - sourceURL: The URL to the MIDI file (typically from document picker)
+    ///   - displayName: Custom display name for the song (nil = auto-format from filename)
+    ///   - customSpeed: Custom scroll speed override (nil = use calculated speed)
     /// - Returns: The imported SongInfo if successful, nil otherwise
     @discardableResult
-    func importSong(from sourceURL: URL) -> SongInfo? {
+    func importSong(from sourceURL: URL, displayName: String? = nil, customSpeed: CGFloat? = nil) -> SongInfo? {
         let directoryURL = getImportedSongsDirectory()
 
         // Get the original filename
@@ -198,13 +201,13 @@ class ImportedSongManager {
             return nil
         }
 
-        // Create metadata entry
-        let displayName = formatDisplayName(from: destinationFileName)
+        // Create metadata entry with custom display name if provided
+        let finalDisplayName = displayName ?? formatDisplayName(from: destinationFileName)
         let songData = ImportedSongData(
             fileName: destinationFileName,
-            displayName: displayName,
+            displayName: finalDisplayName,
             importDate: Date(),
-            customSpeed: nil  // Phase 1: no custom speed
+            customSpeed: customSpeed.map { Double($0) }  // Convert CGFloat to Double for storage
         )
 
         // Add to our data and save
@@ -214,8 +217,8 @@ class ImportedSongManager {
         // Create SongInfo with prefix to avoid ID collisions with bundled songs
         let songInfo = SongInfo(
             url: destinationURL,
-            displayName: displayName,
-            customSpeed: nil,
+            displayName: finalDisplayName,
+            customSpeed: customSpeed,
             startFromNote: nil,
             category: "Imported",
             idPrefix: ImportedSongManager.importedIdPrefix
@@ -224,7 +227,7 @@ class ImportedSongManager {
         availableImportedSongs.append(songInfo)
 
         #if DEBUG
-        print("ImportedSongManager: Successfully imported '\(displayName)'")
+        print("ImportedSongManager: Successfully imported '\(finalDisplayName)' with custom speed: \(String(describing: customSpeed))")
         #endif
 
         return songInfo
@@ -319,5 +322,37 @@ class ImportedSongManager {
     func reload() {
         loadImportedSongsData()
         rebuildAvailableSongs()
+    }
+
+    // MARK: - Name Validation
+
+    /// Checks if a display name is already used by an imported song
+    /// - Parameter name: The display name to check
+    /// - Returns: True if the name is already in use
+    func isDisplayNameTaken(_ name: String) -> Bool {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return importedSongsData.contains { $0.displayName.lowercased() == normalizedName }
+    }
+
+    /// Generates a unique display name by appending (1), (2), etc. if needed
+    /// - Parameter baseName: The desired base name
+    /// - Returns: A unique name, either the original or with a numeric suffix
+    func uniqueDisplayName(for baseName: String) -> String {
+        let trimmedName = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // If the name isn't taken, use it as-is
+        if !isDisplayNameTaken(trimmedName) {
+            return trimmedName
+        }
+
+        // Find the next available number
+        var counter = 1
+        var candidateName = "\(trimmedName) (\(counter))"
+        while isDisplayNameTaken(candidateName) {
+            counter += 1
+            candidateName = "\(trimmedName) (\(counter))"
+        }
+
+        return candidateName
     }
 }

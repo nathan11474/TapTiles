@@ -204,16 +204,12 @@ extension ImportScene: UIDocumentPickerDelegate {
             return
         }
 
-        // Import the selected file
-        if let importedSong = ImportedSongManager.shared.importSong(from: selectedURL) {
-            #if DEBUG
-            print("ImportScene: Successfully imported '\(importedSong.title)'")
-            #endif
-            // Return to song list with imports tab selected
-            transitionToSongList()
-        } else {
-            showStatus("Failed to import file", isError: true)
-        }
+        #if DEBUG
+        print("ImportScene: Selected file '\(selectedURL.lastPathComponent)'")
+        #endif
+
+        // Transition to ImportPreviewScene for customization
+        transitionToPreview(with: selectedURL)
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -221,5 +217,15 @@ extension ImportScene: UIDocumentPickerDelegate {
         #if DEBUG
         print("ImportScene: Document picker cancelled")
         #endif
+    }
+}
+
+// MARK: - Preview Transition
+
+extension ImportScene {
+    private func transitionToPreview(with fileURL: URL) {
+        let previewScene = ImportPreviewScene(size: size, sourceURL: fileURL)
+        previewScene.scaleMode = scaleMode
+        view?.presentScene(previewScene)
     }
 }

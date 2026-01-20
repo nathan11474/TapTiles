@@ -158,15 +158,15 @@ Enable users to import MIDI files that immediately become playable. No customiza
 - [x] No new compiler warnings related to import feature
 
 #### Manual Verification:
-- [ ] "Import" button appears in Imports tab header
-- [ ] Tapping "Import" opens iOS file picker
-- [ ] Selecting a MIDI file copies it to app storage
-- [ ] Imported song appears in Imports tab with correct title (derived from filename)
-- [ ] Imported song shows calculated difficulty
-- [ ] Tapping play on imported song starts the game
-- [ ] Game plays correctly with imported MIDI file
-- [ ] Closing and reopening app preserves imported songs
-- [ ] Search filter works for imported songs
+- [x] "Import" button appears in Imports tab header
+- [x] Tapping "Import" opens iOS file picker
+- [x] Selecting a MIDI file copies it to app storage
+- [x] Imported song appears in Imports tab with correct title (derived from filename)
+- [x] Imported song shows calculated difficulty
+- [x] Tapping play on imported song starts the game
+- [x] Game plays correctly with imported MIDI file
+- [x] Closing and reopening app preserves imported songs
+- [x] Search filter works for imported songs
 
 **Implementation Note**: After completing Phase 1 and all verification passes, pause for user testing before proceeding to Phase 2.
 
@@ -258,15 +258,15 @@ Add the ability to customize display name and scroll speed before importing, plu
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] App builds without errors
-- [ ] No new compiler warnings
+- [x] App builds without errors
+- [x] No new compiler warnings
 
 #### Manual Verification:
-- [ ] After selecting file, ImportPreviewScene appears
-- [ ] Display name field shows formatted filename, is editable
-- [ ] Speed slider shows calculated speed as default
-- [ ] Adjusting slider updates speed display
-- [ ] "Preview" button launches gameplay in preview mode
+- [x] After selecting file, ImportPreviewScene appears
+- [x] Display name field shows formatted filename, is editable
+- [x] Speed slider shows calculated speed as default
+- [x] Adjusting slider updates speed display
+- [x] "Preview" button launches gameplay in preview mode
 - [ ] "Exit Preview" button appears during preview gameplay
 - [ ] Exiting preview returns to ImportPreviewScene with settings preserved
 - [ ] Preview mode does NOT save progress/high scores

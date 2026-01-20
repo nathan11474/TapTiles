@@ -24,6 +24,11 @@ class GameScene: SKScene {
     private let customSpeed: CGFloat?  // Optional custom speed override
     private let startFromNote: Int?    // Optional note index to start from
 
+    // MARK: - Preview Mode
+
+    private let isPreviewMode: Bool
+    private let previewReturnState: PreviewState?
+
     /// Song identifier for progress tracking
     /// Imported songs get prefixed with "imported_" to avoid ID collisions with bundled songs
     private var songId: String {
@@ -37,10 +42,12 @@ class GameScene: SKScene {
 
     // MARK: - Initializers
 
-    init(size: CGSize, songURL: URL, customSpeed: CGFloat? = nil, startFromNote: Int? = nil) {
+    init(size: CGSize, songURL: URL, customSpeed: CGFloat? = nil, startFromNote: Int? = nil, isPreviewMode: Bool = false, previewReturnState: PreviewState? = nil) {
         self.songURL = songURL
         self.customSpeed = customSpeed
         self.startFromNote = startFromNote
+        self.isPreviewMode = isPreviewMode
+        self.previewReturnState = previewReturnState
         super.init(size: size)
     }
 
@@ -112,10 +119,24 @@ class GameScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = .white
         view.isMultipleTouchEnabled = true  // Enable simultaneous touch detection
+
+        // In preview mode, start security-scoped access to the file
+        // (ImportPreviewScene maintains access during transition, but we start our own)
+        if isPreviewMode {
+            _ = songURL.startAccessingSecurityScopedResource()
+        }
+
         AudioManager.shared.setup()
         loadBeatmap()
         setupLayout()
         showStartScreen()
+    }
+
+    override func willMove(from view: SKView) {
+        // In preview mode, stop security-scoped access when leaving
+        if isPreviewMode {
+            songURL.stopAccessingSecurityScopedResource()
+        }
     }
 
     private func loadBeatmap() {
@@ -704,12 +725,11 @@ class GameScene: SKScene {
     // MARK: - Touch Handling
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        let location = touch.location(in: self)
+
         switch gameState {
         case .waiting:
-            // Only need first touch for starting the game
-            guard let touch = touches.first else { return }
-            let location = touch.location(in: self)
-
             guard let tile = playTile else { return }
 
             if tile.isLongTile {
@@ -1073,8 +1093,10 @@ class GameScene: SKScene {
             currentStars = newStars
             animateLevelUp(level: currentStars, isStar: true)
 
-            // Save progress
-            ProgressManager.shared.updateStars(for: songId, stars: currentStars, fileURL: songURL)
+            // Save progress (skip in preview mode)
+            if !isPreviewMode {
+                ProgressManager.shared.updateStars(for: songId, stars: currentStars, fileURL: songURL)
+            }
 
             // After 3 stars, start gap period before crowns
             if currentStars == 3 {
@@ -1102,8 +1124,10 @@ class GameScene: SKScene {
             currentCrowns = newCrowns
             animateLevelUp(level: currentCrowns, isStar: false)
 
-            // Save progress
-            ProgressManager.shared.updateCrowns(for: songId, crowns: currentCrowns, fileURL: songURL)
+            // Save progress (skip in preview mode)
+            if !isPreviewMode {
+                ProgressManager.shared.updateCrowns(for: songId, crowns: currentCrowns, fileURL: songURL)
+            }
 
             // After 3 crowns, enter endless mode
             if currentCrowns == 3 {
@@ -1196,6 +1220,12 @@ class GameScene: SKScene {
     }
 
     private func showGameOverScreen() {
+        // In preview mode, show different UI and don't save progress
+        if isPreviewMode {
+            showPreviewCompleteScreen()
+            return
+        }
+
         // Check if this is a new high score before saving
         let previousHighScore = ProgressManager.shared.getProgress(for: songId, fileURL: songURL).highScore
         let isNewHighScore = score > previousHighScore
@@ -1280,6 +1310,59 @@ class GameScene: SKScene {
         addChild(exitButton)
     }
 
+    private func showPreviewCompleteScreen() {
+        // Semi-transparent overlay
+        let overlay = SKSpriteNode(color: UIColor.black.withAlphaComponent(0.5), size: size)
+        overlay.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        overlay.zPosition = 200
+        overlay.name = "gameOverOverlay"
+        addChild(overlay)
+
+        let centerY = size.height / 2
+
+        // Game Over label (same as normal game over)
+        let gameOverLabel = SKLabelNode(text: "Game Over")
+        gameOverLabel.fontName = "Helvetica-Bold"
+        gameOverLabel.fontSize = 48
+        gameOverLabel.fontColor = .white
+        gameOverLabel.position = CGPoint(x: size.width / 2, y: centerY + 90)
+        gameOverLabel.zPosition = 201
+        gameOverLabel.name = "gameOverLabel"
+        addChild(gameOverLabel)
+
+        // Final score label (same as normal game over)
+        let finalScoreLabel = SKLabelNode(text: "Score: \(score)")
+        finalScoreLabel.fontName = "Helvetica-Bold"
+        finalScoreLabel.fontSize = 32
+        finalScoreLabel.fontColor = .white
+        finalScoreLabel.position = CGPoint(x: size.width / 2, y: centerY + 30)
+        finalScoreLabel.zPosition = 201
+        finalScoreLabel.name = "finalScoreLabel"
+        addChild(finalScoreLabel)
+
+        // No "New High Score!" in preview mode
+
+        // Restart button (same as normal game over)
+        let restartButton = SKLabelNode(text: "Restart")
+        restartButton.fontName = "Helvetica-Bold"
+        restartButton.fontSize = 36
+        restartButton.fontColor = .white
+        restartButton.position = CGPoint(x: size.width / 2, y: centerY - 60)
+        restartButton.zPosition = 201
+        restartButton.name = "restartButton"
+        addChild(restartButton)
+
+        // Exit button (same as normal game over, but returns to ImportPreviewScene)
+        let exitButton = SKLabelNode(text: "Exit")
+        exitButton.fontName = "Helvetica-Bold"
+        exitButton.fontSize = 36
+        exitButton.fontColor = .white
+        exitButton.position = CGPoint(x: size.width / 2, y: centerY - 120)
+        exitButton.zPosition = 201
+        exitButton.name = "exitButton"
+        addChild(exitButton)
+    }
+
     // MARK: - Restart
 
     private func restartGame() {
@@ -1348,6 +1431,14 @@ class GameScene: SKScene {
 
     private func exitToSongList() {
         AudioManager.shared.stopAllNotes()
+
+        // In preview mode, return to import preview scene with preserved state
+        if isPreviewMode, let state = previewReturnState {
+            let previewScene = ImportPreviewScene(size: size, sourceURL: state.sourceURL, restoredState: state)
+            previewScene.scaleMode = scaleMode
+            view?.presentScene(previewScene)
+            return
+        }
 
         let songListScene = SongListScene(size: size)
         songListScene.scaleMode = scaleMode
