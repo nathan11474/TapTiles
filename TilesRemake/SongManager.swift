@@ -62,6 +62,18 @@ class SongManager {
         }
     }
 
+    /// Clear cached difficulty for a specific song (used when deleting imported songs)
+    func clearCachedDifficulty(for songId: String) {
+        cacheQueue.sync {
+            if difficultyCache.removeValue(forKey: songId) != nil {
+                saveDifficultyCache()
+                #if DEBUG
+                print("SongManager: Cleared cached difficulty for \(songId)")
+                #endif
+            }
+        }
+    }
+
     // MARK: - Cache Persistence
 
     private func loadDifficultyCache() {

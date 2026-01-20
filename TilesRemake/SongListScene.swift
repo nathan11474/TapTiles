@@ -50,6 +50,12 @@ class SongListScene: SKScene {
     // Favorite buttons
     private var favoriteButtons: [(button: SKNode, song: SongInfo)] = []
 
+    // Delete buttons (for imported songs)
+    private var deleteButtons: [(button: SKNode, song: SongInfo)] = []
+
+    // Edit buttons (for imported songs)
+    private var editButtons: [(button: SKNode, song: SongInfo)] = []
+
     // Import button (shown on Imports tab)
     private var importButton: SKNode?
 
@@ -158,7 +164,7 @@ class SongListScene: SKScene {
             tabLabel.fontName = tab == currentTab ? "Helvetica-Bold" : "Helvetica"
             tabLabel.fontSize = 22
             tabLabel.fontColor = tab == currentTab ? .black : .gray
-            tabLabel.verticalAlignmentMode = .center
+            tabLabel.verticalAlignmentMode = .baseline
             tabLabel.horizontalAlignmentMode = .center
             tabLabel.name = "tabLabel"
             tabContainer.addChild(tabLabel)
@@ -518,6 +524,8 @@ class SongListScene: SKScene {
         scrollContainer.removeAllChildren()
         playButtons.removeAll()
         favoriteButtons.removeAll()
+        deleteButtons.removeAll()
+        editButtons.removeAll()
 
         // Calculate content height
         contentHeight = CGFloat(filteredSongs.count) * rowHeight
@@ -525,10 +533,18 @@ class SongListScene: SKScene {
         // Create rows in scroll container (positioned from top)
         for (index, item) in filteredSongs.enumerated() {
             let yPos = visibleAreaTop - CGFloat(index) * rowHeight - rowHeight / 2
-            let (songRow, playButton, favoriteButton) = createSongRow(song: item.song, difficulty: item.difficulty, at: yPos)
+            // Check if song is imported by seeing if its ID has the imported prefix
+            let isImported = item.song.id.hasPrefix(ImportedSongManager.importedIdPrefix)
+            let (songRow, playButton, favoriteButton, deleteButton, editButton) = createSongRow(song: item.song, difficulty: item.difficulty, at: yPos, isImported: isImported)
             scrollContainer.addChild(songRow)
             playButtons.append((button: playButton, song: item.song))
             favoriteButtons.append((button: favoriteButton, song: item.song))
+            if let deleteBtn = deleteButton {
+                deleteButtons.append((button: deleteBtn, song: item.song))
+            }
+            if let editBtn = editButton {
+                editButtons.append((button: editBtn, song: item.song))
+            }
         }
 
         // Show message if no songs found (only on Songs tab - Favorites tab handles its own empty state)
@@ -551,7 +567,7 @@ class SongListScene: SKScene {
         scrollContainer.position.y = scrollOffset
     }
 
-    private func createSongRow(song: SongInfo, difficulty: Int, at yPos: CGFloat) -> (container: SKNode, playButton: SKNode, favoriteButton: SKNode) {
+    private func createSongRow(song: SongInfo, difficulty: Int, at yPos: CGFloat, isImported: Bool = false) -> (container: SKNode, playButton: SKNode, favoriteButton: SKNode, deleteButton: SKNode?, editButton: SKNode?) {
         let container = SKNode()
         container.position = CGPoint(x: 0, y: yPos)
         container.name = "songRow_\(song.id)"
@@ -640,21 +656,26 @@ class SongListScene: SKScene {
             }
         }
 
-        // Favorite button (heart icon) - positioned above play button
+        // Right side buttons positioning
+        // For imported songs: heart icon at top, edit in middle, delete below, play at bottom
+        // For regular songs: heart icon at top, play at bottom
+        let rightEdgeX = size.width - padding - 25
+
+        // Favorite button (heart icon) - positioned at top right
         let favoriteButtonContainer = SKNode()
-        favoriteButtonContainer.position = CGPoint(x: size.width - padding - 25, y: 18)
+        favoriteButtonContainer.position = CGPoint(x: rightEdgeX, y: isImported ? 22 : 18)
         favoriteButtonContainer.zPosition = 10
         favoriteButtonContainer.name = "favoriteButton_\(song.id)"
 
         // Invisible hit area for easier tapping
-        let favoriteHitAreaSize: CGFloat = 44
+        let favoriteHitAreaSize: CGFloat = 36
         let favoriteHitArea = SKShapeNode(rectOf: CGSize(width: favoriteHitAreaSize, height: favoriteHitAreaSize))
         favoriteHitArea.fillColor = .clear
         favoriteHitArea.strokeColor = .clear
         favoriteButtonContainer.addChild(favoriteHitArea)
 
         // Heart icon
-        let heartIconSize = CGSize(width: 22, height: 22)
+        let heartIconSize = CGSize(width: 20, height: 20)
         if let heartTexture = getHeartIcon(filled: isFavorited, size: heartIconSize) {
             let heartIcon = SKSpriteNode(texture: heartTexture)
             heartIcon.name = "heartIcon"
@@ -663,10 +684,61 @@ class SongListScene: SKScene {
 
         container.addChild(favoriteButtonContainer)
 
-        // Play button container (larger hit area) - positioned below heart icon
+        // Edit and delete buttons (only for imported songs)
+        var deleteButtonContainer: SKNode?
+        var editButtonContainer: SKNode?
+
+        if isImported {
+            // Edit button (pencil icon) - positioned below heart
+            let editContainer = SKNode()
+            editContainer.position = CGPoint(x: rightEdgeX, y: 0)
+            editContainer.zPosition = 10
+            editContainer.name = "editButton_\(song.id)"
+
+            let editHitArea = SKShapeNode(rectOf: CGSize(width: 36, height: 36))
+            editHitArea.fillColor = .clear
+            editHitArea.strokeColor = .clear
+            editContainer.addChild(editHitArea)
+
+            let editIconSize = CGSize(width: 18, height: 18)
+            if let editTexture = getActionIcon(symbolName: "pencil", color: .darkGray, size: editIconSize) {
+                let editIcon = SKSpriteNode(texture: editTexture)
+                editContainer.addChild(editIcon)
+            }
+
+            container.addChild(editContainer)
+            editButtonContainer = editContainer
+
+            // Delete button (trash icon) - positioned below edit
+            let deleteContainer = SKNode()
+            deleteContainer.position = CGPoint(x: rightEdgeX, y: -22)
+            deleteContainer.zPosition = 10
+            deleteContainer.name = "deleteButton_\(song.id)"
+
+            let deleteHitArea = SKShapeNode(rectOf: CGSize(width: 36, height: 36))
+            deleteHitArea.fillColor = .clear
+            deleteHitArea.strokeColor = .clear
+            deleteContainer.addChild(deleteHitArea)
+
+            let deleteIconSize = CGSize(width: 18, height: 18)
+            if let deleteTexture = getActionIcon(symbolName: "trash", color: .systemRed, size: deleteIconSize) {
+                let deleteIcon = SKSpriteNode(texture: deleteTexture)
+                deleteContainer.addChild(deleteIcon)
+            }
+
+            container.addChild(deleteContainer)
+            deleteButtonContainer = deleteContainer
+        }
+
+        // Play button container (larger hit area) - positioned at bottom right
         let playButtonContainer = SKNode()
-        playButtonContainer.position = CGPoint(x: size.width - padding - 25, y: -14)
+        playButtonContainer.position = CGPoint(x: rightEdgeX, y: isImported ? -22 : -14)
         playButtonContainer.zPosition = 10  // Ensure it's above other elements
+
+        // For imported songs, play button is positioned differently (to the left of delete)
+        if isImported {
+            playButtonContainer.position = CGPoint(x: rightEdgeX - 40, y: 0)
+        }
 
         // Invisible hit area (larger than the triangle for easier tapping)
         let hitAreaSize: CGFloat = 44
@@ -690,7 +762,24 @@ class SongListScene: SKScene {
 
         container.addChild(playButtonContainer)
 
-        return (container, playButtonContainer, favoriteButtonContainer)
+        return (container, playButtonContainer, favoriteButtonContainer, deleteButtonContainer, editButtonContainer)
+    }
+
+    /// Gets an action icon texture (edit, delete) - caches similar to heart icons
+    private static var cachedActionIcons: [String: SKTexture] = [:]
+
+    private func getActionIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {
+        let key = "\(symbolName)-\(color.cgColor.hashValue)"
+
+        if let cached = SongListScene.cachedActionIcons[key] {
+            return cached
+        }
+
+        if let texture = renderProgressIcon(symbolName: symbolName, color: color, size: size) {
+            SongListScene.cachedActionIcons[key] = texture
+            return texture
+        }
+        return nil
     }
 
     // MARK: - Difficulty Calculation
@@ -830,6 +919,28 @@ class SongListScene: SKScene {
             }
         }
 
+        // Check delete buttons (imported songs only)
+        for (button, song) in deleteButtons {
+            if let parent = button.parent {
+                let locationInParent = parent.convert(location, from: self)
+                if button.contains(locationInParent) {
+                    showDeleteConfirmation(for: song)
+                    return
+                }
+            }
+        }
+
+        // Check edit buttons (imported songs only)
+        for (button, song) in editButtons {
+            if let parent = button.parent {
+                let locationInParent = parent.convert(location, from: self)
+                if button.contains(locationInParent) {
+                    transitionToEditSong(song)
+                    return
+                }
+            }
+        }
+
         // Start scroll tracking
         lastTouchY = location.y
         lastTouchTime = CACurrentMediaTime()
@@ -921,6 +1032,57 @@ class SongListScene: SKScene {
         let importScene = ImportScene(size: size)
         importScene.scaleMode = scaleMode
         view?.presentScene(importScene)
+    }
+
+    private func transitionToEditSong(_ song: SongInfo) {
+        searchTextField?.removeFromSuperview()
+        searchTextField = nil
+
+        let editScene = EditImportedSongScene(size: size, song: song)
+        editScene.scaleMode = scaleMode
+        view?.presentScene(editScene)
+    }
+
+    private func showDeleteConfirmation(for song: SongInfo) {
+        guard let windowScene = view?.window?.windowScene,
+              let viewController = windowScene.windows.first?.rootViewController else {
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Delete Song",
+            message: "Are you sure you want to delete \"\(song.title)\"? This cannot be undone.",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.deleteImportedSong(song)
+        })
+
+        viewController.present(alert, animated: true)
+    }
+
+    private func deleteImportedSong(_ song: SongInfo) {
+        // Delete from ImportedSongManager
+        if ImportedSongManager.shared.deleteImportedSong(id: song.id) {
+            // Clear any cached difficulty
+            SongManager.shared.clearCachedDifficulty(for: song.id)
+
+            // Clear progress data (high score, stars, crowns, favorite status)
+            ProgressManager.shared.clearProgress(for: song.id)
+
+            // Rebuild the imports list
+            filterAndRebuildImports()
+
+            #if DEBUG
+            print("SongListScene: Successfully deleted imported song '\(song.title)'")
+            #endif
+        } else {
+            #if DEBUG
+            print("SongListScene: Failed to delete imported song '\(song.title)'")
+            #endif
+        }
     }
 
     private func toggleFavorite(for song: SongInfo, button: SKNode) {

@@ -318,6 +318,73 @@ class ImportedSongManager {
         return true
     }
 
+    /// Updates an imported song's settings (display name and/or custom speed)
+    /// - Parameters:
+    ///   - songId: The song ID (with "imported_" prefix)
+    ///   - displayName: New display name (nil = keep current)
+    ///   - customSpeed: New custom speed (nil = use calculated)
+    /// - Returns: true if update was successful
+    @discardableResult
+    func updateImportedSong(id songId: String, displayName: String? = nil, customSpeed: CGFloat?) -> Bool {
+        // Strip the prefix from the songId to get the base filename
+        let baseId: String
+        if songId.hasPrefix(ImportedSongManager.importedIdPrefix) {
+            baseId = String(songId.dropFirst(ImportedSongManager.importedIdPrefix.count))
+        } else {
+            baseId = songId
+        }
+
+        // Find the song data by matching the base ID (filename without extension)
+        guard let index = importedSongsData.firstIndex(where: {
+            ($0.fileName as NSString).deletingPathExtension == baseId
+        }) else {
+            #if DEBUG
+            print("ImportedSongManager: Song not found for update: \(songId)")
+            #endif
+            return false
+        }
+
+        let existingData = importedSongsData[index]
+
+        // Create updated data entry
+        let updatedData = ImportedSongData(
+            fileName: existingData.fileName,
+            displayName: displayName ?? existingData.displayName,
+            importDate: existingData.importDate,
+            customSpeed: customSpeed.map { Double($0) }
+        )
+
+        // Update in array
+        importedSongsData[index] = updatedData
+        saveImportedSongsData()
+
+        // Rebuild the available songs list to reflect changes
+        rebuildAvailableSongs()
+
+        #if DEBUG
+        print("ImportedSongManager: Updated '\(updatedData.displayName)' with custom speed: \(String(describing: customSpeed))")
+        #endif
+
+        return true
+    }
+
+    /// Gets the stored data for an imported song by its ID
+    /// - Parameter songId: The song ID (with "imported_" prefix)
+    /// - Returns: The song data if found
+    func getImportedSongData(id songId: String) -> ImportedSongData? {
+        // Strip the prefix from the songId to get the base filename
+        let baseId: String
+        if songId.hasPrefix(ImportedSongManager.importedIdPrefix) {
+            baseId = String(songId.dropFirst(ImportedSongManager.importedIdPrefix.count))
+        } else {
+            baseId = songId
+        }
+
+        return importedSongsData.first {
+            ($0.fileName as NSString).deletingPathExtension == baseId
+        }
+    }
+
     /// Reloads all imported songs (useful after external changes)
     func reload() {
         loadImportedSongsData()

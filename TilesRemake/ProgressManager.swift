@@ -100,6 +100,18 @@ class ProgressManager {
         return getProgress(for: songId, fileURL: fileURL).isFavorite
     }
 
+    /// Clear all progress for a song (used when deleting imported songs)
+    func clearProgress(for songId: String) {
+        if progressCache.removeValue(forKey: songId) != nil {
+            // Also clear any cached file hash
+            fileHashCache.removeValue(forKey: songId)
+            saveProgress()
+            #if DEBUG
+            print("ProgressManager: Cleared progress for \(songId)")
+            #endif
+        }
+    }
+
     /// Update all progress for a song at once
     func updateProgress(for songId: String, score: Int, stars: Int, crowns: Int, fileURL: URL) {
         var progress = getProgress(for: songId, fileURL: fileURL)

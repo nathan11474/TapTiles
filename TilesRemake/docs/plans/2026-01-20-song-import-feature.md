@@ -267,13 +267,13 @@ Add the ability to customize display name and scroll speed before importing, plu
 - [x] Speed slider shows calculated speed as default
 - [x] Adjusting slider updates speed display
 - [x] "Preview" button launches gameplay in preview mode
-- [ ] "Exit Preview" button appears during preview gameplay
-- [ ] Exiting preview returns to ImportPreviewScene with settings preserved
-- [ ] Preview mode does NOT save progress/high scores
-- [ ] "Import" saves song with custom display name
-- [ ] "Import" saves song with adjusted speed if changed
-- [ ] Imported song plays at the custom speed
-- [ ] "Cancel" discards file and returns to song list
+- [x] "Exit Preview" button appears during preview gameplay
+- [x] Exiting preview returns to ImportPreviewScene with settings preserved
+- [x] Preview mode does NOT save progress/high scores
+- [x] "Import" saves song with custom display name
+- [x] "Import" saves song with adjusted speed if changed
+- [x] Imported song plays at the custom speed
+- [x] "Cancel" discards file and returns to song list
 
 **Implementation Note**: After completing Phase 2 and all verification passes, pause for user testing before proceeding to Phase 3.
 
@@ -346,8 +346,8 @@ Add ability to delete imported songs and edit their settings after import.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] App builds without errors
-- [ ] No new compiler warnings
+- [x] App builds without errors
+- [x] No new compiler warnings
 
 #### Manual Verification:
 - [ ] Delete button appears only on imported song rows
