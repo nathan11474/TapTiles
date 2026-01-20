@@ -71,29 +71,37 @@ class ImportScene: SKScene {
         buttonContainer.name = "importButton"
 
         // Button background
-        let buttonWidth: CGFloat = 200
+        let buttonWidth: CGFloat = 220
         let buttonHeight: CGFloat = 50
         let buttonBackground = SKShapeNode(rectOf: CGSize(width: buttonWidth, height: buttonHeight), cornerRadius: 10)
         buttonBackground.fillColor = UIColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 1.0)
         buttonBackground.strokeColor = .clear
         buttonContainer.addChild(buttonBackground)
 
-        // Plus icon (using SF Symbol rendered as texture)
+        // Center the icon + text as a group
+        // Icon: 24pt wide, Gap: 8pt, Text: ~130pt wide = ~162pt total
+        // Icon center should be at: -162/2 + 12 = -69
+        // Text left edge should be at: -69 + 12 + 8 = -49
         let iconSize = CGSize(width: 24, height: 24)
+        let gapBetweenIconAndText: CGFloat = 8
+        let totalContentWidth: CGFloat = 162  // icon (24) + gap (8) + text (~130)
+        let iconCenterX = -totalContentWidth / 2 + iconSize.width / 2
+
+        // Plus icon (using SF Symbol rendered as texture)
         if let iconTexture = renderIcon(symbolName: "plus.circle.fill", color: .white, size: iconSize) {
             let iconNode = SKSpriteNode(texture: iconTexture)
-            iconNode.position = CGPoint(x: -60, y: 0)
+            iconNode.position = CGPoint(x: iconCenterX, y: 0)
             buttonContainer.addChild(iconNode)
         }
 
-        // Button text
+        // Button text (left-aligned, positioned after icon)
         let buttonLabel = SKLabelNode(text: "Select MIDI File")
         buttonLabel.fontName = "Helvetica-Bold"
         buttonLabel.fontSize = 18
         buttonLabel.fontColor = .white
         buttonLabel.verticalAlignmentMode = .center
-        buttonLabel.horizontalAlignmentMode = .center
-        buttonLabel.position = CGPoint(x: 10, y: 0)
+        buttonLabel.horizontalAlignmentMode = .left
+        buttonLabel.position = CGPoint(x: iconCenterX + iconSize.width / 2 + gapBetweenIconAndText, y: 0)
         buttonContainer.addChild(buttonLabel)
 
         addChild(buttonContainer)
@@ -134,9 +142,9 @@ class ImportScene: SKScene {
         if let importBtn = importButton {
             // Create a larger hit area for the button
             let hitRect = CGRect(
-                x: importBtn.position.x - 100,
+                x: importBtn.position.x - 110,
                 y: importBtn.position.y - 25,
-                width: 200,
+                width: 220,
                 height: 50
             )
             if hitRect.contains(location) {

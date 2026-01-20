@@ -190,52 +190,41 @@ class SongListScene: SKScene {
     }
 
     private func setupImportButton() {
+        let padding: CGFloat = 20
+        let buttonWidth = size.width - padding * 2
+        let buttonHeight: CGFloat = 44
+        let gapBetweenRows: CGFloat = 10  // Same gap as between song cards
+
+        // Search bar: y=125 from top (UIKit), height=40, so bottom at y=165 from top
+        // In SpriteKit: search bar bottom is at size.height - 165
+        // Button top should be 10pt below search bar bottom
+        let searchBarBottomSpriteKit = size.height - 165
+        let buttonTop = searchBarBottomSpriteKit - gapBetweenRows
+        let buttonY = buttonTop - buttonHeight / 2
+
         let buttonContainer = SKNode()
-        buttonContainer.position = CGPoint(x: size.width - 50, y: size.height - 60)
+        buttonContainer.position = CGPoint(x: size.width / 2, y: buttonY)
         buttonContainer.zPosition = 101
         buttonContainer.name = "importButton"
         buttonContainer.alpha = 0  // Hidden by default
 
-        // Button background (circle)
-        let circleSize: CGFloat = 36
-        let circle = SKShapeNode(circleOfRadius: circleSize / 2)
-        circle.fillColor = UIColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 1.0)
-        circle.strokeColor = .clear
-        buttonContainer.addChild(circle)
+        // Button background (rounded rectangle matching search bar width)
+        let buttonBackground = SKShapeNode(rectOf: CGSize(width: buttonWidth, height: buttonHeight), cornerRadius: 8)
+        buttonBackground.fillColor = UIColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 1.0)
+        buttonBackground.strokeColor = .clear
+        buttonContainer.addChild(buttonBackground)
 
-        // Plus icon
-        let iconSize = CGSize(width: 20, height: 20)
-        if let iconTexture = renderImportIcon(symbolName: "plus", color: .white, size: iconSize) {
-            let iconNode = SKSpriteNode(texture: iconTexture)
-            buttonContainer.addChild(iconNode)
-        }
+        // Button text
+        let buttonLabel = SKLabelNode(text: "Import")
+        buttonLabel.fontName = "Helvetica-Bold"
+        buttonLabel.fontSize = 18
+        buttonLabel.fontColor = .white
+        buttonLabel.verticalAlignmentMode = .center
+        buttonLabel.horizontalAlignmentMode = .center
+        buttonContainer.addChild(buttonLabel)
 
         addChild(buttonContainer)
         importButton = buttonContainer
-    }
-
-    /// Renders an SF Symbol as a texture for the import button
-    private func renderImportIcon(symbolName: String, color: UIColor, size: CGSize) -> SKTexture? {
-        let config = UIImage.SymbolConfiguration(pointSize: size.height, weight: .bold)
-        guard let symbolImage = UIImage(systemName: symbolName, withConfiguration: config) else {
-            return nil
-        }
-
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let image = renderer.image { context in
-            color.setFill()
-            let symbolSize = symbolImage.size
-            let scale = min(size.width / symbolSize.width, size.height / symbolSize.height)
-            let scaledWidth = symbolSize.width * scale
-            let scaledHeight = symbolSize.height * scale
-            let x = (size.width - scaledWidth) / 2
-            let y = (size.height - scaledHeight) / 2
-            let drawRect = CGRect(x: x, y: y, width: scaledWidth, height: scaledHeight)
-            symbolImage.draw(in: drawRect, blendMode: .normal, alpha: 1.0)
-            context.fill(CGRect(origin: .zero, size: size), blendMode: .sourceIn)
-        }
-
-        return SKTexture(image: image)
     }
 
     private func switchToTab(_ tab: Tab) {
@@ -254,8 +243,18 @@ class SongListScene: SKScene {
         scrollOffset = 0
         scrollVelocity = 0
 
-        // Show/hide import button based on tab
-        importButton?.alpha = (tab == .imports) ? 1.0 : 0.0
+        // Show/hide import button and adjust visible area based on tab
+        if tab == .imports {
+            importButton?.alpha = 1.0
+            // Adjust visible area to account for import button
+            // Button bottom is at: (size.height - 175 - 22) - 22 = size.height - 219
+            // First song box top should be 10pt below that: size.height - 229
+            // Song box top = visibleAreaTop - 5, so visibleAreaTop = size.height - 224
+            visibleAreaTop = size.height - 224
+        } else {
+            importButton?.alpha = 0.0
+            visibleAreaTop = size.height - 180
+        }
 
         // Update content based on tab
         switch tab {
@@ -883,12 +882,14 @@ class SongListScene: SKScene {
 
         // Check import button (only visible on Imports tab)
         if currentTab == .imports, let importBtn = importButton {
-            let hitAreaSize: CGFloat = 44
+            let padding: CGFloat = 20
+            let buttonWidth = size.width - padding * 2
+            let buttonHeight: CGFloat = 44
             let hitRect = CGRect(
-                x: importBtn.position.x - hitAreaSize / 2,
-                y: importBtn.position.y - hitAreaSize / 2,
-                width: hitAreaSize,
-                height: hitAreaSize
+                x: importBtn.position.x - buttonWidth / 2,
+                y: importBtn.position.y - buttonHeight / 2,
+                width: buttonWidth,
+                height: buttonHeight
             )
             if hitRect.contains(location) {
                 transitionToImport()
