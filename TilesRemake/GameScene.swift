@@ -1186,6 +1186,10 @@ class GameScene: SKScene {
     }
 
     private func showGameOverScreen() {
+        // Check if this is a new high score before saving
+        let previousHighScore = ProgressManager.shared.getProgress(for: songId, fileURL: songURL).highScore
+        let isNewHighScore = score > previousHighScore
+
         // Save high score
         ProgressManager.shared.updateHighScore(for: songId, score: score, fileURL: songURL)
 
@@ -1196,12 +1200,16 @@ class GameScene: SKScene {
         overlay.name = "gameOverOverlay"
         addChild(overlay)
 
+        // Calculate vertical layout positions
+        let centerY = size.height / 2
+        let newHighScoreOffset: CGFloat = isNewHighScore ? 30 : 0  // Shift elements up if showing new high score
+
         // Game Over label
         let gameOverLabel = SKLabelNode(text: "Game Over")
         gameOverLabel.fontName = "Helvetica-Bold"
         gameOverLabel.fontSize = 48
         gameOverLabel.fontColor = .white
-        gameOverLabel.position = CGPoint(x: size.width / 2, y: size.height / 2 + 60)
+        gameOverLabel.position = CGPoint(x: size.width / 2, y: centerY + 90 + newHighScoreOffset)
         gameOverLabel.zPosition = 201
         gameOverLabel.name = "gameOverLabel"
         addChild(gameOverLabel)
@@ -1211,17 +1219,42 @@ class GameScene: SKScene {
         finalScoreLabel.fontName = "Helvetica-Bold"
         finalScoreLabel.fontSize = 32
         finalScoreLabel.fontColor = .white
-        finalScoreLabel.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        finalScoreLabel.position = CGPoint(x: size.width / 2, y: centerY + 30 + newHighScoreOffset)
         finalScoreLabel.zPosition = 201
         finalScoreLabel.name = "finalScoreLabel"
         addChild(finalScoreLabel)
+
+        // New high score label (if applicable)
+        if isNewHighScore {
+            let goldenColor = UIColor(red: 1.0, green: 0.84, blue: 0.0, alpha: 1.0)
+
+            let newHighScoreLabel = SKLabelNode(text: "New High Score!")
+            newHighScoreLabel.fontName = "Helvetica-Bold"
+            newHighScoreLabel.fontSize = 28
+            newHighScoreLabel.fontColor = goldenColor
+            newHighScoreLabel.position = CGPoint(x: size.width / 2, y: centerY - 20 + newHighScoreOffset)
+            newHighScoreLabel.zPosition = 201
+            newHighScoreLabel.name = "newHighScoreLabel"
+
+            // Start with alpha 0 for fade-in animation
+            newHighScoreLabel.alpha = 0
+            addChild(newHighScoreLabel)
+
+            // Animate: fade in, then pulse scale
+            let fadeIn = SKAction.fadeIn(withDuration: 0.3)
+            let scaleUp = SKAction.scale(to: 1.15, duration: 0.2)
+            let scaleDown = SKAction.scale(to: 1.0, duration: 0.2)
+            let pulse = SKAction.sequence([scaleUp, scaleDown])
+            let animation = SKAction.sequence([fadeIn, pulse])
+            newHighScoreLabel.run(animation)
+        }
 
         // Restart button
         let restartButton = SKLabelNode(text: "Restart")
         restartButton.fontName = "Helvetica-Bold"
         restartButton.fontSize = 36
         restartButton.fontColor = .white
-        restartButton.position = CGPoint(x: size.width / 2, y: size.height / 2 - 60)
+        restartButton.position = CGPoint(x: size.width / 2, y: centerY - 60)
         restartButton.zPosition = 201
         restartButton.name = "restartButton"
         addChild(restartButton)
@@ -1231,7 +1264,7 @@ class GameScene: SKScene {
         exitButton.fontName = "Helvetica-Bold"
         exitButton.fontSize = 36
         exitButton.fontColor = .white
-        exitButton.position = CGPoint(x: size.width / 2, y: size.height / 2 - 120)
+        exitButton.position = CGPoint(x: size.width / 2, y: centerY - 120)
         exitButton.zPosition = 201
         exitButton.name = "exitButton"
         addChild(exitButton)
@@ -1261,6 +1294,7 @@ class GameScene: SKScene {
         childNode(withName: "gameOverOverlay")?.removeFromParent()
         childNode(withName: "gameOverLabel")?.removeFromParent()
         childNode(withName: "finalScoreLabel")?.removeFromParent()
+        childNode(withName: "newHighScoreLabel")?.removeFromParent()
         childNode(withName: "restartButton")?.removeFromParent()
         childNode(withName: "exitButton")?.removeFromParent()
 
