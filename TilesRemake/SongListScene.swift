@@ -35,6 +35,22 @@ class SongListScene: SKScene {
     private var loadingLabel: SKLabelNode?
     private var pendingDifficultyCalculations: Set<String> = []
 
+    // Tab system
+    private enum Tab: String, CaseIterable {
+        case songs = "Songs"
+        case favorites = "Favorites"
+    }
+    private var currentTab: Tab = .songs
+    private var tabNodes: [Tab: SKNode] = [:]
+    private var tabUnderlines: [Tab: SKShapeNode] = [:]
+    private var emptyFavoritesLabel: SKLabelNode?
+
+    // Favorite buttons
+    private var favoriteButtons: [(button: SKNode, song: SongInfo)] = []
+
+    // Cache for heart icon textures
+    private static var cachedHeartIcons: [String: SKTexture] = [:]
+
     // Difficulty thresholds (based on notes per second - screen independent)
     private static let difficultyThresholds: [(maxNotesPerSec: CGFloat, level: Int)] = [
         (2.0, 1),   // Easy: up to 2 notes/sec
@@ -112,14 +128,123 @@ class SongListScene: SKScene {
         backButton.zPosition = 101
         addChild(backButton)
 
-        // "Select Song" header (positioned lower)
-        let headerLabel = SKLabelNode(text: "Select Song")
-        headerLabel.fontName = "Helvetica-Bold"
-        headerLabel.fontSize = 32
-        headerLabel.fontColor = .black
-        headerLabel.position = CGPoint(x: size.width / 2, y: size.height - 110)
-        headerLabel.zPosition = 101
-        addChild(headerLabel)
+        // Tab bar
+        setupTabBar()
+    }
+
+    private func setupTabBar() {
+        // Center tabs between back button (y: size.height - 60) and search bar (y: size.height - 125)
+        let tabY = size.height - 92
+        let tabSpacing: CGFloat = 140
+        let totalWidth = tabSpacing * CGFloat(Tab.allCases.count - 1)
+        let startX = (size.width - totalWidth) / 2
+
+        for (index, tab) in Tab.allCases.enumerated() {
+            let tabX = startX + CGFloat(index) * tabSpacing
+
+            // Tab container for hit testing
+            let tabContainer = SKNode()
+            tabContainer.position = CGPoint(x: tabX, y: tabY)
+            tabContainer.name = "tab_\(tab.rawValue)"
+            tabContainer.zPosition = 101
+
+            // Tab label
+            let tabLabel = SKLabelNode(text: tab.rawValue)
+            tabLabel.fontName = tab == currentTab ? "Helvetica-Bold" : "Helvetica"
+            tabLabel.fontSize = 22
+            tabLabel.fontColor = tab == currentTab ? .black : .gray
+            tabLabel.verticalAlignmentMode = .center
+            tabLabel.horizontalAlignmentMode = .center
+            tabLabel.name = "tabLabel"
+            tabContainer.addChild(tabLabel)
+
+            // Underline indicator (only visible for active tab)
+            let underlineWidth: CGFloat = 60
+            let underlineHeight: CGFloat = 3
+            let underline = SKShapeNode(rectOf: CGSize(width: underlineWidth, height: underlineHeight), cornerRadius: 1.5)
+            underline.fillColor = .black
+            underline.strokeColor = .clear
+            underline.position = CGPoint(x: 0, y: -20)
+            underline.alpha = tab == currentTab ? 1.0 : 0.0
+            underline.name = "tabUnderline"
+            tabContainer.addChild(underline)
+
+            addChild(tabContainer)
+            tabNodes[tab] = tabContainer
+            tabUnderlines[tab] = underline
+        }
+    }
+
+    private func switchToTab(_ tab: Tab) {
+        guard tab != currentTab else { return }
+
+        // Update tab appearance
+        for (t, container) in tabNodes {
+            if let label = container.childNode(withName: "tabLabel") as? SKLabelNode {
+                label.fontName = t == tab ? "Helvetica-Bold" : "Helvetica"
+                label.fontColor = t == tab ? .black : .gray
+            }
+            tabUnderlines[t]?.alpha = t == tab ? 1.0 : 0.0
+        }
+
+        currentTab = tab
+        scrollOffset = 0
+        scrollVelocity = 0
+
+        // Update content based on tab
+        switch tab {
+        case .songs:
+            hideEmptyFavoritesMessage()
+            searchTextField?.isHidden = false
+            filterAndRebuildSongList()
+        case .favorites:
+            childNode(withName: "noSongsLabel")?.removeFromParent()
+            searchTextField?.isHidden = true
+            filterAndRebuildFavorites()
+        }
+    }
+
+    private func filterAndRebuildFavorites() {
+        hideEmptyFavoritesMessage()
+
+        // Get all favorited songs with their difficulties
+        let favoriteSongs = songs.filter { song in
+            ProgressManager.shared.isFavorite(for: song.id, fileURL: song.url)
+        }.map { song -> (song: SongInfo, difficulty: Int) in
+            let difficulty = SongManager.shared.getCachedDifficulty(for: song.id) ?? 3
+            return (song: song, difficulty: difficulty)
+        }.sorted { lhs, rhs in
+            if lhs.difficulty != rhs.difficulty {
+                return lhs.difficulty < rhs.difficulty
+            }
+            return lhs.song.title < rhs.song.title
+        }
+
+        filteredSongs = favoriteSongs
+        rebuildSongList()
+
+        // Show empty message if no favorites
+        if favoriteSongs.isEmpty {
+            showEmptyFavoritesMessage()
+        }
+    }
+
+    private func showEmptyFavoritesMessage() {
+        guard emptyFavoritesLabel == nil else { return }
+
+        let label = SKLabelNode(text: "No favorites yet")
+        label.fontName = "Helvetica"
+        label.fontSize = 24
+        label.fontColor = .gray
+        label.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        label.name = "emptyFavoritesLabel"
+        addChild(label)
+        emptyFavoritesLabel = label
+    }
+
+    private func hideEmptyFavoritesMessage() {
+        emptyFavoritesLabel?.removeFromParent()
+        emptyFavoritesLabel = nil
     }
 
     private func setupSearchBar(in view: SKView) {
@@ -235,6 +360,7 @@ class SongListScene: SKScene {
         // Clear existing song rows
         scrollContainer.removeAllChildren()
         playButtons.removeAll()
+        favoriteButtons.removeAll()
 
         // Calculate content height
         contentHeight = CGFloat(filteredSongs.count) * rowHeight
@@ -242,9 +368,10 @@ class SongListScene: SKScene {
         // Create rows in scroll container (positioned from top)
         for (index, item) in filteredSongs.enumerated() {
             let yPos = visibleAreaTop - CGFloat(index) * rowHeight - rowHeight / 2
-            let (songRow, playButton) = createSongRow(song: item.song, difficulty: item.difficulty, at: yPos)
+            let (songRow, playButton, favoriteButton) = createSongRow(song: item.song, difficulty: item.difficulty, at: yPos)
             scrollContainer.addChild(songRow)
             playButtons.append((button: playButton, song: item.song))
+            favoriteButtons.append((button: favoriteButton, song: item.song))
         }
 
         // Show message if no songs found
@@ -267,17 +394,20 @@ class SongListScene: SKScene {
         scrollContainer.position.y = scrollOffset
     }
 
-    private func createSongRow(song: SongInfo, difficulty: Int, at yPos: CGFloat) -> (container: SKNode, playButton: SKNode) {
+    private func createSongRow(song: SongInfo, difficulty: Int, at yPos: CGFloat) -> (container: SKNode, playButton: SKNode, favoriteButton: SKNode) {
         let container = SKNode()
         container.position = CGPoint(x: 0, y: yPos)
         container.name = "songRow_\(song.id)"
 
         let boxHeight = rowHeight - 10
-        let difficultyBoxWidth = boxHeight  // Square difficulty box
+        let difficultyBoxWidth: CGFloat = 50  // Narrower difficulty box
         let cornerRadius: CGFloat = 10
         let padding: CGFloat = 20
         let songBoxWidth = size.width - padding * 2 - difficultyBoxWidth - 5  // 5pt gap between boxes
         let songBoxLeftEdge = padding + difficultyBoxWidth + 15
+
+        // Check if song is favorited
+        let isFavorited = ProgressManager.shared.isFavorite(for: song.id, fileURL: song.url)
 
         // Difficulty box (left side, same height as song box)
         let difficultyBox = SKShapeNode(rectOf: CGSize(width: difficultyBoxWidth, height: boxHeight), cornerRadius: cornerRadius)
@@ -353,9 +483,32 @@ class SongListScene: SKScene {
             }
         }
 
-        // Play button container (larger hit area) - positioned relative to container
+        // Favorite button (heart icon) - positioned above play button
+        let favoriteButtonContainer = SKNode()
+        favoriteButtonContainer.position = CGPoint(x: size.width - padding - 25, y: 18)
+        favoriteButtonContainer.zPosition = 10
+        favoriteButtonContainer.name = "favoriteButton_\(song.id)"
+
+        // Invisible hit area for easier tapping
+        let favoriteHitAreaSize: CGFloat = 44
+        let favoriteHitArea = SKShapeNode(rectOf: CGSize(width: favoriteHitAreaSize, height: favoriteHitAreaSize))
+        favoriteHitArea.fillColor = .clear
+        favoriteHitArea.strokeColor = .clear
+        favoriteButtonContainer.addChild(favoriteHitArea)
+
+        // Heart icon
+        let heartIconSize = CGSize(width: 22, height: 22)
+        if let heartTexture = getHeartIcon(filled: isFavorited, size: heartIconSize) {
+            let heartIcon = SKSpriteNode(texture: heartTexture)
+            heartIcon.name = "heartIcon"
+            favoriteButtonContainer.addChild(heartIcon)
+        }
+
+        container.addChild(favoriteButtonContainer)
+
+        // Play button container (larger hit area) - positioned below heart icon
         let playButtonContainer = SKNode()
-        playButtonContainer.position = CGPoint(x: size.width - padding - 25, y: 0)
+        playButtonContainer.position = CGPoint(x: size.width - padding - 25, y: -14)
         playButtonContainer.zPosition = 10  // Ensure it's above other elements
 
         // Invisible hit area (larger than the triangle for easier tapping)
@@ -380,7 +533,7 @@ class SongListScene: SKScene {
 
         container.addChild(playButtonContainer)
 
-        return (container, playButtonContainer)
+        return (container, playButtonContainer, favoriteButtonContainer)
     }
 
     // MARK: - Difficulty Calculation
@@ -462,6 +615,26 @@ class SongListScene: SKScene {
             return
         }
 
+        // Check tab buttons
+        for tab in Tab.allCases {
+            if let tabNode = tabNodes[tab] {
+                // Create a hit area around the tab (larger than just the text)
+                let hitAreaWidth: CGFloat = 70
+                let hitAreaHeight: CGFloat = 50
+                let tabLocation = tabNode.position
+                let hitRect = CGRect(
+                    x: tabLocation.x - hitAreaWidth / 2,
+                    y: tabLocation.y - hitAreaHeight / 2,
+                    width: hitAreaWidth,
+                    height: hitAreaHeight
+                )
+                if hitRect.contains(location) {
+                    switchToTab(tab)
+                    return
+                }
+            }
+        }
+
         // Check play buttons only (not the entire song row)
         for (button, song) in playButtons {
             // Convert scene location to the button's parent coordinate space
@@ -469,6 +642,17 @@ class SongListScene: SKScene {
                 let locationInParent = parent.convert(location, from: self)
                 if button.contains(locationInParent) {
                     startGame(with: song)
+                    return
+                }
+            }
+        }
+
+        // Check favorite buttons
+        for (button, song) in favoriteButtons {
+            if let parent = button.parent {
+                let locationInParent = parent.convert(location, from: self)
+                if button.contains(locationInParent) {
+                    toggleFavorite(for: song, button: button)
                     return
                 }
             }
@@ -558,6 +742,24 @@ class SongListScene: SKScene {
         view?.presentScene(gameScene)
     }
 
+    private func toggleFavorite(for song: SongInfo, button: SKNode) {
+        let isNowFavorite = ProgressManager.shared.toggleFavorite(for: song.id, fileURL: song.url)
+
+        // Update the heart icon
+        if let heartIcon = button.childNode(withName: "heartIcon") as? SKSpriteNode {
+            let heartIconSize = CGSize(width: 22, height: 22)
+            if let newTexture = getHeartIcon(filled: isNowFavorite, size: heartIconSize) {
+                heartIcon.texture = newTexture
+            }
+        }
+
+        // If we're on the favorites tab and unfavorited, remove from list
+        if currentTab == .favorites && !isNowFavorite {
+            // Rebuild to remove the unfavorited song
+            filterAndRebuildFavorites()
+        }
+    }
+
     // MARK: - Progress Icon Rendering
 
     // Cache for progress icon textures (only 4 unique icons needed)
@@ -605,6 +807,25 @@ class SongListScene: SKScene {
         }
 
         return SKTexture(image: image)
+    }
+
+    // MARK: - Heart Icon Rendering
+
+    /// Gets a cached heart icon texture, creating it if needed
+    private func getHeartIcon(filled: Bool, size: CGSize) -> SKTexture? {
+        let symbolName = filled ? "heart.fill" : "heart"
+        let color: UIColor = filled ? .systemRed : .lightGray
+        let key = "\(symbolName)-\(filled ? "red" : "gray")"
+
+        if let cached = SongListScene.cachedHeartIcons[key] {
+            return cached
+        }
+
+        if let texture = renderProgressIcon(symbolName: symbolName, color: color, size: size) {
+            SongListScene.cachedHeartIcons[key] = texture
+            return texture
+        }
+        return nil
     }
 }
 

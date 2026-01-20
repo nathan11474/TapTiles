@@ -7,6 +7,7 @@ struct SongProgress: Codable {
     var highScore: Int = 0
     var stars: Int = 0      // 0-3
     var crowns: Int = 0     // 0-3
+    var isFavorite: Bool = false
     var fileHash: String?   // File fingerprint (size + modification date) to detect when file is replaced
 }
 
@@ -82,6 +83,21 @@ class ProgressManager {
             progressCache[songId] = progress
             saveProgress()
         }
+    }
+
+    /// Toggle favorite status for a song
+    func toggleFavorite(for songId: String, fileURL: URL) -> Bool {
+        var progress = getProgress(for: songId, fileURL: fileURL)
+        progress.isFavorite = !progress.isFavorite
+        progress.fileHash = getFileHash(for: songId, url: fileURL)
+        progressCache[songId] = progress
+        saveProgress()
+        return progress.isFavorite
+    }
+
+    /// Check if a song is favorited
+    func isFavorite(for songId: String, fileURL: URL? = nil) -> Bool {
+        return getProgress(for: songId, fileURL: fileURL).isFavorite
     }
 
     /// Update all progress for a song at once
