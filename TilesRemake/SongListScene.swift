@@ -199,7 +199,7 @@ class SongListScene: SKScene {
             filterAndRebuildSongList()
         case .favorites:
             childNode(withName: "noSongsLabel")?.removeFromParent()
-            searchTextField?.isHidden = true
+            searchTextField?.isHidden = false
             filterAndRebuildFavorites()
         }
     }
@@ -208,12 +208,23 @@ class SongListScene: SKScene {
         hideEmptyFavoritesMessage()
 
         // Get all favorited songs with their difficulties
-        let favoriteSongs = songs.filter { song in
+        var favoriteSongs = songs.filter { song in
             ProgressManager.shared.isFavorite(for: song.id, fileURL: song.url)
         }.map { song -> (song: SongInfo, difficulty: Int) in
             let difficulty = SongManager.shared.getCachedDifficulty(for: song.id) ?? 3
             return (song: song, difficulty: difficulty)
-        }.sorted { lhs, rhs in
+        }
+
+        // Apply search filter if query is not empty
+        if !searchQuery.isEmpty {
+            favoriteSongs = favoriteSongs.filter {
+                $0.song.title.localizedCaseInsensitiveContains(searchQuery) ||
+                $0.song.category.localizedCaseInsensitiveContains(searchQuery)
+            }
+        }
+
+        // Sort by difficulty, then by name
+        favoriteSongs.sort { lhs, rhs in
             if lhs.difficulty != rhs.difficulty {
                 return lhs.difficulty < rhs.difficulty
             }
@@ -232,7 +243,8 @@ class SongListScene: SKScene {
     private func showEmptyFavoritesMessage() {
         guard emptyFavoritesLabel == nil else { return }
 
-        let label = SKLabelNode(text: "No favorites yet")
+        let message = searchQuery.isEmpty ? "No favorites yet" : "No matching favorites"
+        let label = SKLabelNode(text: message)
         label.fontName = "Helvetica"
         label.fontSize = 24
         label.fontColor = .gray
@@ -280,7 +292,13 @@ class SongListScene: SKScene {
         // Debounce: wait for typing to stop before rebuilding
         searchDebounceTimer?.invalidate()
         searchDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
-            self?.filterAndRebuildSongList()
+            guard let self = self else { return }
+            switch self.currentTab {
+            case .songs:
+                self.filterAndRebuildSongList()
+            case .favorites:
+                self.filterAndRebuildFavorites()
+            }
         }
     }
 
@@ -374,9 +392,9 @@ class SongListScene: SKScene {
             favoriteButtons.append((button: favoriteButton, song: item.song))
         }
 
-        // Show message if no songs found
+        // Show message if no songs found (only on Songs tab - Favorites tab handles its own empty state)
         childNode(withName: "noSongsLabel")?.removeFromParent()
-        if filteredSongs.isEmpty {
+        if filteredSongs.isEmpty && currentTab == .songs {
             let noSongsLabel = SKLabelNode(text: searchQuery.isEmpty ? "No songs found" : "No matching songs")
             noSongsLabel.fontName = "Helvetica"
             noSongsLabel.fontSize = 24
