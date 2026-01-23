@@ -230,6 +230,9 @@ class SongListScene: SKScene {
     private func switchToTab(_ tab: Tab) {
         guard tab != currentTab else { return }
 
+        // Hide loading message if still visible (from async difficulty calculation)
+        hideLoadingMessage()
+
         // Update tab appearance
         for (t, container) in tabNodes {
             if let label = container.childNode(withName: "tabLabel") as? SKLabelNode {
@@ -834,10 +837,18 @@ class SongListScene: SKScene {
                     guard let self = self else { return }
                     self.pendingDifficultyCalculations.remove(song.id)
 
-                    // When all calculations are complete, show the sorted list
+                    // When all calculations are complete, rebuild the current tab's content
                     if self.pendingDifficultyCalculations.isEmpty {
                         self.hideLoadingMessage()
-                        self.buildSortedSongList()
+                        // Rebuild based on which tab is currently active
+                        switch self.currentTab {
+                        case .songs:
+                            self.filterAndRebuildSongList()
+                        case .favorites:
+                            self.filterAndRebuildFavorites()
+                        case .imports:
+                            self.filterAndRebuildImports()
+                        }
                     }
                 }
             }
