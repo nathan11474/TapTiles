@@ -350,16 +350,16 @@ Add ability to delete imported songs and edit their settings after import.
 - [x] No new compiler warnings
 
 #### Manual Verification:
-- [ ] Delete button appears only on imported song rows
-- [ ] Delete button shows confirmation dialog
-- [ ] Confirming delete removes song from list
-- [ ] Deleted song file is removed from device storage
-- [ ] App restart confirms song is permanently deleted
-- [ ] Edit button appears only on imported song rows
-- [ ] Edit screen shows current settings
-- [ ] Saving edits updates display name in list
-- [ ] Saving edits updates custom speed for gameplay
-- [ ] Canceling edit preserves original settings
+- [x] Delete button appears only on imported song rows
+- [x] Delete button shows confirmation dialog
+- [x] Confirming delete removes song from list
+- [x] Deleted song file is removed from device storage
+- [x] App restart confirms song is permanently deleted
+- [x] Edit button appears only on imported song rows
+- [x] Edit screen shows current settings
+- [x] Saving edits updates display name in list
+- [x] Saving edits updates custom speed for gameplay
+- [x] Canceling edit preserves original settings
 
 ---
 
