@@ -467,6 +467,9 @@ class EditImportedSongScene: SKScene {
             displayName: finalName,
             customSpeed: finalSpeed
         ) {
+            // Clear cached difficulty so it gets recalculated with new speed
+            SongManager.shared.clearCachedDifficulty(for: song.id)
+
             #if DEBUG
             print("EditImportedSongScene: Successfully updated '\(finalName)'")
             #endif

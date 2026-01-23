@@ -331,9 +331,14 @@ class GameScene: SKScene {
             bar.addChild(trophyIconNode)
         }
 
-        // High score
-        let progress = ProgressManager.shared.getProgress(for: songId, fileURL: songURL)
-        let highScoreText = progress.highScore > 0 ? "High Score: \(progress.highScore)" : "No high score yet"
+        // High score (skip in preview mode since song isn't imported yet)
+        let highScoreText: String
+        if isPreviewMode {
+            highScoreText = "Preview Mode"
+        } else {
+            let progress = ProgressManager.shared.getProgress(for: songId, fileURL: songURL)
+            highScoreText = progress.highScore > 0 ? "High Score: \(progress.highScore)" : "No high score yet"
+        }
         let highScoreLabel = SKLabelNode(text: highScoreText)
         highScoreLabel.fontName = "Helvetica"
         highScoreLabel.fontSize = 22
