@@ -6,13 +6,53 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXCopyFilesBuildPhase section */
+		54FE063E2F24ED1700ED2BF5 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		54775CE22F132ECD00A48606 /* TilesRemake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TilesRemake.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		54FE063D2F24ED1700ED2BF5 /* TilesRemake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TilesRemake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		54FE06432F24F01A00ED2BF5 /* Exceptions for "TilesRemake" folder in "TilesRemake" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 54775CE12F132ECD00A48606 /* TilesRemake */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		54FE063F2F24ED1700ED2BF5 /* Exceptions for "TilesRemake" folder in "Embed Frameworks" phase from "TilesRemake" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			attributesByRelativePath = {
+				GoogleMobileAds.xcframework = (CodeSignOnCopy, RemoveHeadersOnCopy, );
+			};
+			buildPhase = 54FE063E2F24ED1700ED2BF5 /* Embed Frameworks */;
+			membershipExceptions = (
+				GoogleMobileAds.xcframework,
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		54775CE42F132ECD00A48606 /* TilesRemake */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				54FE06432F24F01A00ED2BF5 /* Exceptions for "TilesRemake" folder in "TilesRemake" target */,
+				54FE063F2F24ED1700ED2BF5 /* Exceptions for "TilesRemake" folder in "Embed Frameworks" phase from "TilesRemake" target */,
+			);
 			path = TilesRemake;
 			sourceTree = "<group>";
 		};
@@ -33,16 +73,8 @@
 			isa = PBXGroup;
 			children = (
 				54775CE42F132ECD00A48606 /* TilesRemake */,
-				54775CE32F132ECD00A48606 /* Products */,
+				54FE063D2F24ED1700ED2BF5 /* TilesRemake.app */,
 			);
-			sourceTree = "<group>";
-		};
-		54775CE32F132ECD00A48606 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				54775CE22F132ECD00A48606 /* TilesRemake.app */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -55,6 +87,7 @@
 				54775CDE2F132ECD00A48606 /* Sources */,
 				54775CDF2F132ECD00A48606 /* Frameworks */,
 				54775CE02F132ECD00A48606 /* Resources */,
+				54FE063E2F24ED1700ED2BF5 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -64,10 +97,8 @@
 				54775CE42F132ECD00A48606 /* TilesRemake */,
 			);
 			name = TilesRemake;
-			packageProductDependencies = (
-			);
 			productName = TilesRemake;
-			productReference = 54775CE22F132ECD00A48606 /* TilesRemake.app */;
+			productReference = 54FE063D2F24ED1700ED2BF5 /* TilesRemake.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -95,7 +126,7 @@
 			mainGroup = 54775CD92F132ECD00A48606;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 54775CE32F132ECD00A48606 /* Products */;
+			productRefGroup = 54775CD92F132ECD00A48606;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -252,7 +283,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3SMGBN3B49;
+				GADApplicationIdentifier = "ca-app-pub-7117418330459420~5308692951";
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TilesRemake/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -284,7 +317,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3SMGBN3B49;
+				GADApplicationIdentifier = "ca-app-pub-7117418330459420~5308692951";
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TilesRemake/Info.plist;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;

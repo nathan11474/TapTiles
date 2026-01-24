@@ -6,6 +6,7 @@
 //
 
 import UIKit
+import GoogleMobileAds
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -14,7 +15,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Initialize Google Mobile Ads SDK
+        MobileAds.shared.start { status in
+            #if DEBUG
+            print("AdMob SDK initialized. Adapters: \(status.adapterStatusesByClassName)")
+            #endif
+            // Configure AdManager after SDK is ready
+            AdManager.shared.configure()
+        }
+
         return true
     }
 

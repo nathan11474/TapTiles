@@ -1371,6 +1371,11 @@ class GameScene: SKScene {
     // MARK: - Restart
 
     private func restartGame() {
+        // Show interstitial ad occasionally
+        if let viewController = view?.window?.rootViewController {
+            AdManager.shared.onGameSessionEnd(from: viewController)
+        }
+
         // Stop all playing notes
         AudioManager.shared.stopAllNotes()
 
@@ -1435,6 +1440,11 @@ class GameScene: SKScene {
     // MARK: - Navigation
 
     private func exitToSongList() {
+        // Show interstitial ad occasionally
+        if let viewController = view?.window?.rootViewController {
+            AdManager.shared.onGameSessionEnd(from: viewController)
+        }
+
         AudioManager.shared.stopAllNotes()
 
         // In preview mode, return to import preview scene with preserved state

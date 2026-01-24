@@ -1,0 +1,29 @@
+# Sound fonts
+FluidR3_GM.sf2
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Package.resolved
+
+# Google Mobile Ads SDK (download manually when needed)
+TilesRemake/GoogleMobileAds.xcframework/
+
+# Python virtual environment
+.venv/
+
+# macOS
+.DS_Store
+*.swp
+*~
