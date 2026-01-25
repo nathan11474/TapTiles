@@ -212,19 +212,42 @@ class SongListScene: SKScene {
         let buttonBackground = SKShapeNode(rectOf: CGSize(width: buttonWidth, height: buttonHeight), cornerRadius: 8)
         buttonBackground.fillColor = UIColor(red: 0.2, green: 0.6, blue: 1.0, alpha: 1.0)
         buttonBackground.strokeColor = .clear
+        buttonBackground.name = "importButtonBackground"
         buttonContainer.addChild(buttonBackground)
 
-        // Button text
+        // Button text (will be updated based on purchase state)
         let buttonLabel = SKLabelNode(text: "Import")
         buttonLabel.fontName = "Helvetica-Bold"
         buttonLabel.fontSize = 18
         buttonLabel.fontColor = .white
         buttonLabel.verticalAlignmentMode = .center
         buttonLabel.horizontalAlignmentMode = .center
+        buttonLabel.name = "importButtonLabel"
         buttonContainer.addChild(buttonLabel)
 
         addChild(buttonContainer)
         importButton = buttonContainer
+
+        // Update appearance based on purchase state
+        updateImportButtonAppearance()
+    }
+
+    private func updateImportButtonAppearance() {
+        guard let buttonContainer = importButton,
+              let buttonLabel = buttonContainer.childNode(withName: "importButtonLabel") as? SKLabelNode else {
+            return
+        }
+
+        Task { @MainActor in
+            let isUnlocked = StoreManager.shared.isImportUnlocked
+
+            if isUnlocked {
+                buttonLabel.text = "Import"
+            } else {
+                let price = StoreManager.shared.importFeaturePrice
+                buttonLabel.text = "🔒 Unlock Import (\(price))"
+            }
+        }
     }
 
     private func switchToTab(_ tab: Tab) {
@@ -248,6 +271,7 @@ class SongListScene: SKScene {
 
         // Show/hide import button and adjust visible area based on tab
         if tab == .imports {
+            updateImportButtonAppearance()
             importButton?.alpha = 1.0
             // Adjust visible area to account for import button
             // Button bottom is at: (size.height - 175 - 22) - 22 = size.height - 219
@@ -1038,12 +1062,114 @@ class SongListScene: SKScene {
     }
 
     private func transitionToImport() {
-        searchTextField?.removeFromSuperview()
-        searchTextField = nil
+        // Check if import feature is unlocked
+        Task { @MainActor in
+            if StoreManager.shared.isImportUnlocked {
+                // Feature unlocked - go to import
+                self.searchTextField?.removeFromSuperview()
+                self.searchTextField = nil
 
-        let importScene = ImportScene(size: size)
-        importScene.scaleMode = scaleMode
-        view?.presentScene(importScene)
+                let importScene = ImportScene(size: self.size)
+                importScene.scaleMode = self.scaleMode
+                self.view?.presentScene(importScene)
+            } else {
+                // Show purchase prompt
+                self.showPurchasePrompt()
+            }
+        }
+    }
+
+    private func showPurchasePrompt() {
+        guard let windowScene = view?.window?.windowScene,
+              let viewController = windowScene.windows.first?.rootViewController else {
+            return
+        }
+
+        let price = StoreManager.shared.importFeaturePrice
+
+        let alert = UIAlertController(
+            title: "Unlock Import Feature",
+            message: "Import your own MIDI files to play custom songs.\n\nPrice: \(price)",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        alert.addAction(UIAlertAction(title: "Buy \(price)", style: .default) { [weak self] _ in
+            self?.handlePurchase()
+        })
+
+        alert.addAction(UIAlertAction(title: "Restore Purchases", style: .default) { [weak self] _ in
+            self?.handleRestore()
+        })
+
+        viewController.present(alert, animated: true)
+    }
+
+    private func handlePurchase() {
+        Task { @MainActor in
+            let success = await StoreManager.shared.purchaseImportFeature()
+
+            if success {
+                // Purchase successful - transition to import
+                self.searchTextField?.removeFromSuperview()
+                self.searchTextField = nil
+
+                let importScene = ImportScene(size: self.size)
+                importScene.scaleMode = self.scaleMode
+                self.view?.presentScene(importScene)
+            } else if let error = StoreManager.shared.errorMessage {
+                self.showErrorAlert(message: error)
+            }
+        }
+    }
+
+    private func handleRestore() {
+        Task { @MainActor in
+            await StoreManager.shared.restorePurchases()
+
+            if StoreManager.shared.isImportUnlocked {
+                // Restored successfully - show success and allow access
+                self.showSuccessAlert(message: "Import feature restored!") {
+                    self.transitionToImport()
+                }
+            } else {
+                self.showErrorAlert(message: "No previous purchase found")
+            }
+        }
+    }
+
+    private func showErrorAlert(message: String) {
+        guard let windowScene = view?.window?.windowScene,
+              let viewController = windowScene.windows.first?.rootViewController else {
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Error",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        viewController.present(alert, animated: true)
+    }
+
+    private func showSuccessAlert(message: String, completion: @escaping () -> Void) {
+        guard let windowScene = view?.window?.windowScene,
+              let viewController = windowScene.windows.first?.rootViewController else {
+            completion()
+            return
+        }
+
+        let alert = UIAlertController(
+            title: "Success",
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
+            completion()
+        })
+        viewController.present(alert, animated: true)
     }
 
     private func transitionToEditSong(_ song: SongInfo) {

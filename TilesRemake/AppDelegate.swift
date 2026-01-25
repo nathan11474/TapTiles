@@ -24,6 +24,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             AdManager.shared.configure()
         }
 
+        // Initialize StoreManager early to load products in background
+        Task {
+            _ = StoreManager.shared
+        }
+
         return true
     }
 

@@ -1,4 +1,5 @@
 import SpriteKit
+import UIKit
 
 // MARK: - Home Scene
 
@@ -69,6 +70,18 @@ class HomeScene: SKScene {
         playButton.position = CGPoint(x: size.width / 2, y: size.height * 0.35)
         playButton.zPosition = 10
         addChild(playButton)
+
+        // Restore Purchases link below play button
+        let restoreLabel = SKLabelNode(text: "Restore Purchases")
+        restoreLabel.fontName = "Helvetica"
+        restoreLabel.fontSize = 16
+        restoreLabel.fontColor = UIColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0)
+        restoreLabel.verticalAlignmentMode = .center
+        restoreLabel.horizontalAlignmentMode = .center
+        restoreLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.35 - 50)
+        restoreLabel.name = "restoreButton"
+        restoreLabel.zPosition = 10
+        addChild(restoreLabel)
     }
 
     private func createPlayButton() -> SKNode {
@@ -106,7 +119,39 @@ class HomeScene: SKScene {
         if let playButton = childNode(withName: "playButton"),
            playButton.contains(location) {
             transitionToSongList()
+            return
         }
+
+        if let restoreButton = childNode(withName: "restoreButton"),
+           restoreButton.contains(location) {
+            handleRestorePurchases()
+            return
+        }
+    }
+
+    // MARK: - Restore Purchases
+
+    private func handleRestorePurchases() {
+        Task { @MainActor in
+            await StoreManager.shared.restorePurchases()
+
+            if StoreManager.shared.isImportUnlocked {
+                showAlert(title: "Restored", message: "Import feature has been restored!")
+            } else {
+                showAlert(title: "No Purchases Found", message: "No previous purchases were found for this Apple ID.")
+            }
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        guard let windowScene = view?.window?.windowScene,
+              let viewController = windowScene.windows.first?.rootViewController else {
+            return
+        }
+
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        viewController.present(alert, animated: true)
     }
 
     // MARK: - Navigation
