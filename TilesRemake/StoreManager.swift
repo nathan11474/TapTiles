@@ -6,7 +6,6 @@
 import StoreKit
 
 /// Manages in-app purchases for the app
-@MainActor
 class StoreManager {
 
     static let shared = StoreManager()
@@ -18,8 +17,13 @@ class StoreManager {
 
     // MARK: - State
 
-    /// Whether the import feature has been purchased
-    private(set) var isImportUnlocked: Bool = false
+    /// Whether the import feature has been purchased (thread-safe access)
+    private(set) var isImportUnlocked: Bool {
+        get { _isImportUnlockedLock.withLock { _isImportUnlocked } }
+        set { _isImportUnlockedLock.withLock { _isImportUnlocked = newValue } }
+    }
+    private var _isImportUnlocked: Bool = false
+    private let _isImportUnlockedLock = NSLock()
 
     /// Available products from the App Store
     private(set) var products: [Product] = []
@@ -34,19 +38,66 @@ class StoreManager {
 
     private var updateListenerTask: Task<Void, Error>?
 
+    // Ready state tracking
+    private var isBackgroundInitComplete = false
+    private var readyCallbacks: [() -> Void] = []
+    private let readyLock = NSLock()
+
     // MARK: - Initialization
 
     private init() {
-        // Load persisted purchase state
-        isImportUnlocked = UserDefaults.standard.bool(forKey: "importFeatureUnlocked")
+        // Load persisted purchase state (quick, synchronous read)
+        _isImportUnlocked = UserDefaults.standard.bool(forKey: "importFeatureUnlocked")
 
+        // Mark as ready immediately - cached state is sufficient for initial UI
+        // Product loading will continue in background
+        markAsReady()
+
+        // Start background initialization
+        Task.detached(priority: .background) { [weak self] in
+            await self?.backgroundInitialize()
+        }
+    }
+
+    /// Background initialization - loads products and checks entitlements
+    private func backgroundInitialize() async {
         // Start listening for transaction updates
         updateListenerTask = listenForTransactions()
 
-        // Load products
-        Task {
-            await loadProducts()
-            await updatePurchasedProducts()
+        // Load products and check entitlements
+        await loadProducts()
+        await updatePurchasedProducts()
+
+        #if DEBUG
+        print("StoreManager: Background initialization complete")
+        #endif
+    }
+
+    /// Register a callback to be notified when StoreManager is ready
+    /// If already ready, callback is invoked immediately on main thread
+    func notifyWhenReady(completion: @escaping () -> Void) {
+        readyLock.lock()
+        if isBackgroundInitComplete {
+            readyLock.unlock()
+            DispatchQueue.main.async { completion() }
+        } else {
+            readyCallbacks.append(completion)
+            readyLock.unlock()
+        }
+    }
+
+    /// Mark as ready and notify all waiting callbacks
+    private func markAsReady() {
+        readyLock.lock()
+        isBackgroundInitComplete = true
+        let callbacks = readyCallbacks
+        readyCallbacks.removeAll()
+        readyLock.unlock()
+
+        DispatchQueue.main.async {
+            for callback in callbacks {
+                callback()
+            }
         }
     }
 
@@ -80,6 +131,7 @@ class StoreManager {
 
     /// Purchases the import feature
     /// - Returns: True if purchase was successful
+    @MainActor
     func purchaseImportFeature() async -> Bool {
         guard let product = products.first(where: { $0.id == StoreManager.importFeatureProductID }) else {
             #if DEBUG
@@ -95,6 +147,7 @@ class StoreManager {
     /// Purchases a product
     /// - Parameter product: The product to purchase
     /// - Returns: True if purchase was successful
+    @MainActor
     func purchase(_ product: Product) async -> Bool {
         isPurchasing = true
         errorMessage = nil
@@ -154,6 +207,7 @@ class StoreManager {
     // MARK: - Restore Purchases
 
     /// Restores previously purchased products
+    @MainActor
     func restorePurchases() async {
         #if DEBUG
         print("StoreManager: Restoring purchases...")

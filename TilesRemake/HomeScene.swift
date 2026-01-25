@@ -30,7 +30,7 @@ class HomeScene: SKScene {
         tapLabel.fontName = "Helvetica-Bold"
         tapLabel.fontSize = 64
         tapLabel.fontColor = .white
-        tapLabel.verticalAlignmentMode = .center
+        tapLabel.verticalAlignmentMode = .baseline
         tapLabel.horizontalAlignmentMode = .center
         tapLabel.position = CGPoint(x: tileWidth / 2, y: size.height - tileHeight / 2)
         addChild(tapLabel)
@@ -46,7 +46,7 @@ class HomeScene: SKScene {
         tilesLabel.fontName = "Helvetica-Bold"
         tilesLabel.fontSize = 64
         tilesLabel.fontColor = .black
-        tilesLabel.verticalAlignmentMode = .center
+        tilesLabel.verticalAlignmentMode = .baseline
         tilesLabel.horizontalAlignmentMode = .center
         tilesLabel.position = CGPoint(x: size.width - tileWidth / 2, y: size.height - tileHeight / 2)
         addChild(tilesLabel)
@@ -71,17 +71,11 @@ class HomeScene: SKScene {
         playButton.zPosition = 10
         addChild(playButton)
 
-        // Restore Purchases link below play button
-        let restoreLabel = SKLabelNode(text: "Restore Purchases")
-        restoreLabel.fontName = "Helvetica"
-        restoreLabel.fontSize = 16
-        restoreLabel.fontColor = UIColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0)
-        restoreLabel.verticalAlignmentMode = .center
-        restoreLabel.horizontalAlignmentMode = .center
-        restoreLabel.position = CGPoint(x: size.width / 2, y: size.height * 0.35 - 50)
-        restoreLabel.name = "restoreButton"
-        restoreLabel.zPosition = 10
-        addChild(restoreLabel)
+        // Restore Purchases button below play button
+        let restoreButton = createRestoreButton()
+        restoreButton.position = CGPoint(x: size.width / 2, y: size.height * 0.35 - 60)
+        restoreButton.zPosition = 10
+        addChild(restoreButton)
     }
 
     private func createPlayButton() -> SKNode {
@@ -103,6 +97,32 @@ class HomeScene: SKScene {
         let label = SKLabelNode(text: "Play")
         label.fontName = "Helvetica-Bold"
         label.fontSize = 28
+        label.fontColor = .white
+        label.verticalAlignmentMode = .center
+        container.addChild(label)
+
+        return container
+    }
+
+    private func createRestoreButton() -> SKNode {
+        let container = SKNode()
+        container.name = "restoreButton"
+
+        let buttonWidth: CGFloat = 200
+        let buttonHeight: CGFloat = 50
+        let cornerRadius: CGFloat = 25
+        let blueColor = UIColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0)
+
+        // Blue rounded button background
+        let background = SKShapeNode(rectOf: CGSize(width: buttonWidth, height: buttonHeight), cornerRadius: cornerRadius)
+        background.fillColor = blueColor
+        background.strokeColor = .clear
+        container.addChild(background)
+
+        // Button label
+        let label = SKLabelNode(text: "Restore Purchases")
+        label.fontName = "Helvetica-Bold"
+        label.fontSize = 18
         label.fontColor = .white
         label.verticalAlignmentMode = .center
         container.addChild(label)

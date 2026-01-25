@@ -30,6 +30,11 @@ class AdManager: NSObject {
     private var sessionsSinceLastAd = 0
     private var isLoadingAd = false
 
+    // Ready state tracking
+    private var isConfigured = false
+    private var readyCallbacks: [() -> Void] = []
+    private let stateQueue = DispatchQueue(label: "com.tilesremake.admanager.state")
+
     // MARK: - Initialization
 
     private override init() {
@@ -38,7 +43,44 @@ class AdManager: NSObject {
 
     /// Call this once in AppDelegate after Google Mobile Ads SDK is started
     func configure() {
-        loadInterstitialAd()
+        // Mark as ready immediately - SDK is initialized, ad loading can happen in background
+        markAsReady()
+
+        // Load ads on a background queue to avoid blocking main thread
+        DispatchQueue.global(qos: .background).async { [weak self] in
+            self?.loadInterstitialAd()
+        }
+    }
+
+    /// Register a callback to be notified when AdManager is ready
+    /// If already ready, callback is invoked immediately on main thread
+    func notifyWhenReady(completion: @escaping () -> Void) {
+        stateQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            if self.isConfigured {
+                DispatchQueue.main.async { completion() }
+            } else {
+                self.readyCallbacks.append(completion)
+            }
+        }
+    }
+
+    /// Mark as configured and notify all waiting callbacks
+    private func markAsReady() {
+        stateQueue.async { [weak self] in
+            guard let self = self, !self.isConfigured else { return }
+
+            self.isConfigured = true
+            let callbacks = self.readyCallbacks
+            self.readyCallbacks.removeAll()
+
+            DispatchQueue.main.async {
+                for callback in callbacks {
+                    callback()
+                }
+            }
+        }
     }
 
     // MARK: - Ad Loading
@@ -48,25 +90,30 @@ class AdManager: NSObject {
 
         isLoadingAd = true
 
-        InterstitialAd.load(
-            with: interstitialAdUnitID,
-            request: Request()
-        ) { [weak self] ad, error in
-            self?.isLoadingAd = false
+        // Ad loading must happen on main thread (Google SDK requirement)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
 
-            if let error = error {
+            InterstitialAd.load(
+                with: self.interstitialAdUnitID,
+                request: Request()
+            ) { [weak self] ad, error in
+                self?.isLoadingAd = false
+
+                if let error = error {
+                    #if DEBUG
+                    print("AdManager: Failed to load interstitial ad: \(error.localizedDescription)")
+                    #endif
+                    return
+                }
+
+                self?.interstitialAd = ad
+                self?.interstitialAd?.fullScreenContentDelegate = self
+
                 #if DEBUG
-                print("AdManager: Failed to load interstitial ad: \(error.localizedDescription)")
+                print("AdManager: Interstitial ad loaded successfully")
                 #endif
-                return
             }
-
-            self?.interstitialAd = ad
-            self?.interstitialAd?.fullScreenContentDelegate = self
-
-            #if DEBUG
-            print("AdManager: Interstitial ad loaded successfully")
-            #endif
         }
     }
 

@@ -13,8 +13,8 @@ class GameViewController: UIViewController {
 
         guard let view = self.view as? SKView else { return }
 
-        // Start with home screen
-        let scene = HomeScene(size: view.bounds.size)
+        // Start with loading screen to preload all resources
+        let scene = LoadingScene(size: view.bounds.size)
         scene.scaleMode = .resizeFill
 
         view.presentScene(scene)

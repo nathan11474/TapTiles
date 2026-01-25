@@ -85,8 +85,7 @@ class SongListScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = .white
 
-        // Start loading audio in background (will be ready by the time user picks a song)
-        AudioManager.shared.setupAsync()
+        // Audio is preloaded by LoadingScene, no need to load here
 
         songs = SongManager.shared.availableSongs
 
